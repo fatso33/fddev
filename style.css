@@ -1,0 +1,79 @@
+/* style.css - Flight Deck v2.1 Primary Master Stylesheet */
+
+@import './css/main.css';
+@import './css/grid.css';
+@import './css/widgets.css';
+@import './css/settings.css';
+
+/* Modals & Dialogs (Presets, Install dialog) */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 200;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px var(--shadow-color);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-card h3 {
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-field label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-label);
+  text-transform: uppercase;
+}
+
+.modal-field input {
+  background: var(--well-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 6px;
+  color: var(--text-white);
+  padding: 10px 12px;
+  font-family: 'Chakra Petch', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  outline: none;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.modal-error-text {
+  font-size: 12px;
+  color: var(--accent-error);
+}

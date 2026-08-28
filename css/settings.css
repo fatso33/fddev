@@ -1,0 +1,376 @@
+/* css/settings.css - Dedicated Static Settings Page Styles */
+
+.fd-settings-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 4px 0 24px;
+  animation: settingsFadeIn 0.2s ease-out;
+}
+
+@keyframes settingsFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.settings-header {
+  padding: 4px 4px 2px;
+}
+
+.settings-eyebrow {
+  font-family: 'Chakra Petch', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.settings-title {
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-white);
+  letter-spacing: -0.02em;
+}
+
+/* Settings Card */
+.settings-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 4px 16px var(--shadow-color);
+}
+
+.settings-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--well-border);
+  gap: 12px;
+}
+
+.settings-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--well-bg);
+  border: 1px solid var(--well-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-cyan);
+  flex-shrink: 0;
+}
+
+.settings-card-title {
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-white);
+}
+
+.settings-card-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.3;
+}
+
+/* Status Pill */
+.settings-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-family: 'Chakra Petch', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.settings-status-badge.connected {
+  background: rgba(0, 255, 60, 0.12);
+  color: var(--accent-green);
+  border: 1px solid rgba(0, 255, 60, 0.35);
+}
+
+.settings-status-badge.disconnected {
+  background: rgba(255, 170, 0, 0.12);
+  color: var(--accent-amber);
+  border: 1px solid rgba(255, 170, 0, 0.35);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.settings-status-badge.connected .status-dot {
+  box-shadow: 0 0 8px var(--accent-green);
+  animation: pulseDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* Sub-sections */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+/* IP Display Box */
+.settings-ip-display-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--well-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.settings-ip-main {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.settings-ip-value {
+  font-family: 'Chakra Petch', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 0.02em;
+}
+
+.settings-ip-port {
+  font-family: 'Chakra Petch', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.settings-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  color: var(--text-white);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-btn-icon:hover {
+  background: var(--btn-active);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.settings-btn-icon.copied {
+  background: rgba(0, 255, 60, 0.15);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+/* Endpoint Box */
+.settings-endpoint-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--well-bg);
+  border: 1px solid var(--well-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.settings-endpoint-code {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-white);
+  word-break: break-all;
+  user-select: all;
+}
+
+.settings-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  color: var(--text-label);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.settings-btn-secondary:hover {
+  color: var(--text-white);
+  border-color: var(--accent-cyan);
+}
+
+.settings-btn-secondary.spinning svg {
+  animation: spin 1s infinite linear;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Interfaces List */
+.settings-interfaces-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-interface-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--well-bg);
+  border: 1px solid var(--well-border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.interface-name {
+  font-family: 'Chakra Petch', monospace;
+  font-weight: 700;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.interface-addr {
+  font-family: 'Chakra Petch', monospace;
+  font-weight: 600;
+  color: var(--text-white);
+}
+
+/* Custom IP Row */
+.settings-custom-ip-row {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-input {
+  flex: 1;
+  background: var(--well-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  color: var(--text-white);
+  padding: 8px 12px;
+  font-family: 'Chakra Petch', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.settings-input:focus {
+  border-color: var(--accent-cyan);
+}
+
+.settings-feedback {
+  font-size: 12px;
+  min-height: 16px;
+}
+
+.settings-feedback.success {
+  color: var(--accent-green);
+}
+
+.settings-feedback.error {
+  color: var(--accent-red, #ef4444);
+}
+
+/* Guide Box */
+.settings-guide-box {
+  background: var(--well-bg);
+  border: 1px solid var(--well-border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-guide-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+.settings-guide-steps {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding-left: 18px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.settings-guide-steps li {
+  margin-bottom: 4px;
+}
+
+.settings-guide-steps code {
+  background: var(--card-bg);
+  border: 1px solid var(--well-border);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-family: 'Chakra Petch', monospace;
+  color: var(--accent-cyan);
+  font-size: 11px;
+}

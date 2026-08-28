@@ -1,0 +1,9 @@
+{
+  "name": "flight-deck-pwa",
+  "version": "1.2.0",
+  "description": "Flight Deck - avionics companion PWA for MSFS 2024",
+  "private": true,
+  "scripts": {
+    "start": "npx serve ."
+  }
+}
