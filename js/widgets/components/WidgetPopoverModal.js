@@ -70,11 +70,16 @@ export function openWidgetPopover({ hostWidget, popoverWidgetId, contextDecl, ev
     font-family: 'Chakra Petch', sans-serif;
   `;
 
+  // Theme-aware via CSS custom properties (main.css redefines these per
+  // [data-theme], same tokens CompositeWidget.js's own outer-container
+  // fallback uses) rather than literal hex — this chrome belongs to the
+  // modal itself, not the popover definition, so it has no style.* of its
+  // own to derive from and previously stayed hardcoded dark in light mode.
   const card = document.createElement('div');
   card.style.cssText = `
-    background: #0d131f;
-    border: 1px solid #22d3ee;
-    box-shadow: 0 0 25px rgba(34, 211, 238, 0.25), 0 20px 40px rgba(0,0,0,0.8);
+    background: var(--card-bg, #0d131f);
+    border: 1px solid var(--accent-cyan, #22d3ee);
+    box-shadow: 0 0 25px color-mix(in srgb, var(--accent-cyan, #22d3ee) 25%, transparent), 0 20px 40px rgba(0,0,0,0.8);
     border-radius: 12px;
     min-width: 320px;
     max-width: 92vw;

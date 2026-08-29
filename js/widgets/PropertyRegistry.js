@@ -37,7 +37,7 @@
 // ---------------------------------------------------------------------------
 export const FDWS_VERSIONS = [
   '1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9', '1.10',
-  '1.11', '1.12', '1.13', '1.14', '1.15', '1.16', '1.17', '1.18'
+  '1.11', '1.12', '1.13', '1.14', '1.15', '1.16', '1.17', '1.18', '1.19'
 ];
 
 // ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ export const ACTIONS = [
     label: 'Open Widget Popover',
     tooltip: 'Opens an author-designed popover widget in a modal, optionally feeding it a read-only $context snapshot from this widget’s state.',
     params: [
-      { key: 'popoverWidgetId', control: 'popoverPicker', tooltip: 'ID of the popover-kind (kind:"popover") widget to open. Not bundled on export — must be installed separately.' },
+      { key: 'popoverWidgetId', control: 'popoverPicker', tooltip: 'ID of the popover-kind (kind:"popover") widget to open. FDWS v1.19+: bundled automatically into this widget\'s "popovers" array on export, so installing this one file installs the popover too.' },
       { key: 'context', control: 'contextMapBuilder', tier: 'advanced', tooltip: 'Maps this widget’s state paths into $context keys the popover can read.' }
     ]
   },

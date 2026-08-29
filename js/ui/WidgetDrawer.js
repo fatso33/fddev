@@ -93,10 +93,13 @@ export class WidgetDrawer {
         const text = await file.text();
         const res = await WidgetRegistry.installDefinition(JSON.parse(text), this.storageManager);
         this.populateCatalog();
+        const popoverNote = res.installedPopovers?.length > 0
+          ? ` (+ ${res.installedPopovers.length} bundled popover${res.installedPopovers.length === 1 ? '' : 's'}: ${res.installedPopovers.map((p) => p.name).join(', ')})`
+          : '';
         if (res.warnings?.length > 0) {
           alert(`Widget installed with warnings:\n• ${res.warnings.join('\n• ')}`);
         } else {
-          alert(`Successfully installed widget: "${res.descriptor.name}"`);
+          alert(`Successfully installed widget: "${res.descriptor.name}"${popoverNote}`);
         }
       } catch (err) {
         alert(`Failed to import widget package: ${err.message}`);

@@ -521,6 +521,41 @@ export class SecurityValidator {
       }
     }
 
+    // FDWS v1.19 §1.5: 'popovers' lets a widget bundle the popover-kind
+    // definition(s) its own core.openWidgetPopover interactions reference,
+    // so a community widget + its popover(s) ship as one file instead of
+    // requiring a separate import per popover. Purely an export/import
+    // convenience — each entry is validated and installed exactly as if it
+    // had been imported on its own (see WidgetRegistry.installDefinition),
+    // then stripped from the host definition that actually gets persisted.
+    // Bounded to one level: a popover can't itself open another popover
+    // (InteractionDispatcher has no such action), so a nested "popovers" on
+    // an embedded entry is dropped rather than recursed into.
+    if (sanitized.popovers !== undefined) {
+      if (!Array.isArray(sanitized.popovers)) {
+        warnings.push('"popovers" must be an array; ignored.');
+        delete sanitized.popovers;
+      } else {
+        const validPopovers = [];
+        sanitized.popovers.forEach((p, idx) => {
+          const raw = (p && typeof p === 'object') ? { ...p } : {};
+          if (raw.popovers !== undefined) {
+            warnings.push(`Embedded popover [${idx}] ("${raw.id || 'unknown'}") declared its own nested "popovers" — nesting isn't supported and was ignored.`);
+            delete raw.popovers;
+          }
+          raw.kind = 'popover';
+          const nested = SecurityValidator.validateFDWSDefinition(raw);
+          if (!nested.valid) {
+            warnings.push(`Embedded popover [${idx}] ("${raw.id || 'unknown'}") failed validation and was dropped: ${nested.errors.join('; ')}`);
+            return;
+          }
+          nested.warnings.forEach((w) => warnings.push(`Embedded popover "${nested.sanitizedDefinition.id}": ${w}`));
+          validPopovers.push(nested.sanitizedDefinition);
+        });
+        sanitized.popovers = validPopovers;
+      }
+    }
+
     // 5. Assets validation (§9.3)
     if (Array.isArray(sanitized.assets)) {
       let totalAssetSize = 0;

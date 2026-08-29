@@ -1049,18 +1049,57 @@ export class StorageManager {
   }
 
   /**
-   * Exports an FDWS widget definition as a single-file .fdwidget JSON string (§9.2)
+   * Collects the unique popoverWidgetId values a widget definition's own
+   * interactions reference via core.openWidgetPopover (FDWS v1.19 §1.5).
+   * @param {object} def
+   * @returns {string[]}
+   */
+  collectReferencedPopoverIds(def) {
+    const ids = new Set();
+    (def.components || []).forEach((comp) => {
+      (comp.interactions || []).forEach((inter) => {
+        if (inter.action?.type === 'core.openWidgetPopover' && inter.action.popoverWidgetId) {
+          ids.add(inter.action.popoverWidgetId);
+        }
+      });
+    });
+    return [...ids];
+  }
+
+  /**
+   * Exports an FDWS widget definition as a single-file .fdwidget JSON string (§9.2).
+   * FDWS v1.19 §1.5: any popover(s) the widget's own interactions reference
+   * are looked up from local storage and inlined into a "popovers" array, so
+   * the exported file is self-contained. A referenced popover that isn't
+   * installed locally is silently left out (same limitation as before this
+   * feature existed — nothing to bundle if it was never installed here).
    * @param {string} definitionId
    * @returns {Promise<string>}
    */
   async exportWidgetDefinitionJSON(definitionId) {
     const def = await this.getWidgetDefinition(definitionId);
     if (!def) throw new Error(`Widget Definition "${definitionId}" not found`);
-    return JSON.stringify(def, null, 2);
+
+    const exportDef = JSON.parse(JSON.stringify(def));
+    const popoverIds = this.collectReferencedPopoverIds(exportDef);
+    if (popoverIds.length > 0) {
+      const popovers = [];
+      for (const id of popoverIds) {
+        const popoverDef = await this.getWidgetDefinition(id);
+        if (popoverDef) popovers.push(popoverDef);
+      }
+      if (popovers.length > 0) exportDef.popovers = popovers;
+    }
+
+    return JSON.stringify(exportDef, null, 2);
   }
 
   /**
-   * Imports and validates a .fdwidget single-file package (§11)
+   * Imports and validates a .fdwidget single-file package (§11). FDWS v1.19
+   * §1.5: any embedded "popovers" (already validated/sanitized by
+   * validateFDWSDefinition) are saved individually first, exactly as if each
+   * had been imported on its own, then stripped from the host definition
+   * before it's persisted.
    * @param {string} jsonString
    * @returns {Promise<{saved: object, warnings: string[]}>}
    */
@@ -1078,7 +1117,16 @@ export class StorageManager {
     }
 
     const sanitized = validation.sanitizedDefinition;
+    const warnings = [...validation.warnings];
+
+    if (Array.isArray(sanitized.popovers) && sanitized.popovers.length > 0) {
+      for (const popoverDef of sanitized.popovers) {
+        await this.saveWidgetDefinition(popoverDef);
+      }
+    }
+    delete sanitized.popovers;
+
     await this.saveWidgetDefinition(sanitized);
-    return { saved: sanitized, warnings: validation.warnings };
+    return { saved: sanitized, warnings };
   }
 }

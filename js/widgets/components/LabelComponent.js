@@ -48,7 +48,19 @@ export class LabelComponent extends BaseComponent {
   update(val, allState) {
     super.update(val, allState);
     if (this.labelNode) {
-      const displayVal = val !== undefined && val !== null ? val : (this.def.props?.text || this.def.label || '');
+      // Bug (found 2026-08-28): this used `this.def.props?.text || this.def.label`,
+      // which treats an intentionally-empty props.text ("") as falsy and falls
+      // through to def.label — the authoring-time Studio display name (e.g.
+      // "COM 1 BG"), never meant to render. Harmless-looking whenever a
+      // component's own typography color happened to match its background
+      // (the "hide leftover placeholder text" trick documented in
+      // ThemeColor.js), since the wrong text was rendered but invisible —
+      // exposed the moment either color changes independently, e.g. a
+      // FDWS v1.18 manual theme override. render() above already got this
+      // right with an explicit `!== undefined` check; update() now matches it.
+      const displayVal = val !== undefined && val !== null
+        ? val
+        : (this.def.props?.text !== undefined ? this.def.props.text : (this.def.label || ''));
       SecurityValidator.setText(this.labelNode, displayVal);
     }
   }

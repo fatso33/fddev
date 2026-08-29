@@ -166,7 +166,7 @@ export class WidgetRegistry {
    * Installs an FDWS Widget Definition into the registry and persists it (§10.3)
    * @param {object} fdwsJson
    * @param {import('../core/StorageManager.js').StorageManager} [storageManager]
-   * @returns {Promise<{descriptor: object, warnings: string[]}>}
+   * @returns {Promise<{descriptor: object, warnings: string[], installedPopovers: object[]}>}
    */
   static async installDefinition(fdwsJson, storageManager) {
     const validation = SecurityValidator.validateFDWSDefinition(fdwsJson);
@@ -175,6 +175,24 @@ export class WidgetRegistry {
     }
 
     const def = validation.sanitizedDefinition;
+    const warnings = [...validation.warnings];
+
+    // FDWS v1.19 §1.5: a widget can bundle the popover(s) its own
+    // core.openWidgetPopover interactions reference in a "popovers" array
+    // (already validated/sanitized above). Install each one exactly as if
+    // it had been imported on its own — same registry entry, same
+    // storage/PC-Bridge push — then strip the array off the host definition
+    // so it isn't persisted twice.
+    const installedPopovers = [];
+    if (Array.isArray(def.popovers) && def.popovers.length > 0) {
+      for (const popoverDef of def.popovers) {
+        const popoverResult = await this.installDefinition(popoverDef, storageManager);
+        installedPopovers.push(popoverResult.descriptor);
+        warnings.push(...popoverResult.warnings);
+      }
+    }
+    delete def.popovers;
+
     this.definitions.set(def.id, def);
 
     const descriptor = {
@@ -211,7 +229,7 @@ export class WidgetRegistry {
       await storageManager.saveWidgetDefinition(def);
     }
 
-    return { descriptor, warnings: validation.warnings };
+    return { descriptor, warnings, installedPopovers };
   }
 
   /**
