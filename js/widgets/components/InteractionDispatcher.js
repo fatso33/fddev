@@ -44,6 +44,7 @@
  */
 
 import { readStateRef } from '../utils/StateRefPath.js';
+import { evaluateConditionExpr } from './ConditionEvaluator.js';
 
 /**
  * Resolves `interactions[]` entries matching `trigger` on `compDef` and runs each one's
@@ -63,6 +64,15 @@ import { readStateRef } from '../utils/StateRefPath.js';
  * `core.input` renderers implement it) and a no-op when there's nothing pending.
  * Scoped to tap/longpress only so a component's own 'blur'/'change'/'focus' interactions
  * (if declared) don't recursively re-trigger this.
+ *
+ * FDWS v1.23: an interaction may declare an optional `condition` — the exact same
+ * allOf/anyOf/equals/gt/… predicate grammar `visibleWhen` and `style.rules` already use
+ * (ConditionEvaluator.js) — that must evaluate true or the whole interaction (feedback
+ * included) is skipped entirely. Added for the case a `visibleWhen`-hidden component
+ * can't cover: a control that should stay visible and tappable, but whose action
+ * shouldn't fire for its current state (e.g. an unset preset button dispatching an
+ * empty/zeroed value instead of doing nothing). No condition means "always runs",
+ * exactly as before this existed.
  * @param {InteractionHost} host
  * @param {object} compDef - component definition (needs `.id`, `.binding`, `.interactions`)
  * @param {string} trigger - 'tap' | 'longpress' | 'change' | 'focus' | 'blur' | …
@@ -77,6 +87,10 @@ export function runInteraction(host, compDef, trigger, eventData = {}) {
   const matching = interactions.filter((i) => i.trigger === trigger);
 
   matching.forEach((interaction) => {
+    if (interaction.condition && !evaluateConditionExpr(interaction.condition, host.getAllStateObject(), host)) {
+      return;
+    }
+
     host.playFeedback?.(interaction.feedback);
 
     const action = interaction.action;

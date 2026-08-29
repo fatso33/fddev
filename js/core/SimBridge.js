@@ -20,6 +20,10 @@ export class SimBridge {
     this.pendingAcks = new Map();
     this.reqCounter = 1;
     this.lastSyncTime = null;
+    // Debounce guard for USER_PRESETS_UPDATED-triggered resyncs (see
+    // checkAndSyncPresets() below) — set the instant a check starts, cleared
+    // 2s later regardless of outcome.
+    this._lastSyncCheckStartedAt = 0;
     this.syncStats = {
       cachedProfilesCount: 0,
       cachedWidgetsCount: 0,
@@ -358,10 +362,27 @@ export class SimBridge {
   /**
    * Checks with PC Bridge if mobile cache has latest non-default presets, widgets, and components.
    * If missing or outdated, fetches them and saves to mobile cache.
+   *
+   * Debounced against its own trigger: `USER_PRESETS_UPDATED` (broadcast to every
+   * connected client, including whichever one just pushed a save — see
+   * handleIncomingMessage()) calls this unconditionally on receipt. A genuine
+   * server-side inconsistency (reproduced 2026-08-29: a duplicate widget file with
+   * an unstable reported `updatedAt` — see pc-bridge's userPresetManager.js) could
+   * make reconcilePushUp() decide to push again every single time, and each push's
+   * own broadcast immediately re-triggered this — an unbounded resync loop with no
+   * external timer needed. That root cause is fixed server-side, but this debounce
+   * stays as a backstop: without it, any future one-off inconsistency turns into the
+   * same runaway loop instead of self-correcting after one harmless extra round trip.
    * @returns {Promise<object>}
    */
   async checkAndSyncPresets() {
     if (!this.connected || !this.storageManager) return null;
+
+    const now = Date.now();
+    if (now - this._lastSyncCheckStartedAt < 2000) {
+      return { status: 'DEBOUNCED' };
+    }
+    this._lastSyncCheckStartedAt = now;
 
     try {
       const localManifest = await this.storageManager.generateSyncManifest();
