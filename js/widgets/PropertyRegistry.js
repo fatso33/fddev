@@ -37,7 +37,7 @@
 // ---------------------------------------------------------------------------
 export const FDWS_VERSIONS = [
   '1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9', '1.10',
-  '1.11', '1.12', '1.13', '1.14', '1.15', '1.16', '1.17', '1.18', '1.19'
+  '1.11', '1.12', '1.13', '1.14', '1.15', '1.16', '1.17', '1.18', '1.19', '1.20'
 ];
 
 // ---------------------------------------------------------------------------
@@ -288,7 +288,12 @@ export const TYPE_FIELDS = {
     { path: 'props.align', control: null, deprecated: true, tooltip: 'Legacy horizontal-align fallback, superseded by style.align.h (FDWS v1.8). Auto-migrated on open, not user-editable.' }
   ],
   'core.display': [
-    { path: 'props.format', control: 'select', optionsRef: 'VALUE_FORMATS', tier: 'simple', group: 'Content', tooltip: 'How the raw value is formatted for display (e.g. FREQUENCY_COM shows "118.000").' },
+    { path: 'props.format', control: 'select', optionsRef: 'VALUE_FORMATS', tier: 'simple', group: 'Content', tooltip: 'How the raw value is formatted for display (e.g. FREQUENCY_COM shows "118.000"). "ODOMETER" (FDWS v1.20) is display-only — appended in Widget Studio\'s own core.display panel rather than the shared VALUE_FORMATS list, since it has no meaning as a core.input mask.' },
+    // FDWS v1.20 §4: mechanical rolling-digit-drum readout — DisplayComponent.js
+    // branches its whole render()/update() to renderOdometer()/setOdometerValue()
+    // when props.format === 'ODOMETER', bypassing ValueFormatter entirely (a
+    // digit-drum readout isn't a formatted string, it's a set of DOM elements).
+    { path: 'props.odometerDigits', control: 'number', tier: 'simple', group: 'Content', fdwsMin: '1.20', tooltip: 'How many whole-number drum positions to show (e.g. 5 for an altimeter up to 99,999). Only used when Value Format is ODOMETER. Default 5.' },
     { path: 'props.decimals', control: 'number', tier: 'simple', group: 'Content', tooltip: 'Decimal places to show, for numeric formats.' },
     { path: 'props.prefix', control: 'text', tier: 'advanced', group: 'Content', tooltip: 'Text prepended before the value (e.g. "ALT ").' },
     { path: 'props.suffix', control: 'text', tier: 'advanced', group: 'Content', tooltip: 'Text appended after the value (e.g. " ft").' },
@@ -333,12 +338,25 @@ export const TYPE_FIELDS = {
     // wrong; corrected after reading GaugeComponent.js's actual call sites.
     // compose, below, is a SEPARATE secondary transform with its own
     // independent axis/clamp/valueRange/outputRange — both sets are real.)
-    { path: 'props.transform', control: 'select', options: ['rotate', 'translate', 'arc-fill'], tier: 'simple', group: 'Gauge', tooltip: 'How the bound value visually drives this gauge — a rotating needle, a sliding bar, or a filling arc.' },
-    { path: 'props.pivot', control: 'text', tier: 'advanced', group: 'Gauge', tooltip: 'CSS transform-origin for the rotate transform, e.g. "50% 50%" to rotate around dead-center. Ignored by Translate/Arc Fill.', showWhen: { path: 'props.transform', equals: 'rotate' } },
-    { path: 'props.axis', control: 'select', options: ['x', 'y'], tier: 'advanced', group: 'Gauge', tooltip: 'Which axis Translate moves along, or which side Arc Fill sweeps from. Ignored by Rotate.', showWhen: { path: 'props.transform', equals: 'translate' } },
-    { path: 'props.clamp', control: 'checkbox', tier: 'advanced', group: 'Gauge', tooltip: 'Clamps the output to its declared range instead of overshooting past it. On by default.' },
-    { path: 'props.valueRange', control: 'rangeEditor', tier: 'simple', group: 'Gauge', tooltip: 'The raw SimVar value span this gauge reads (e.g. 0–400 for airspeed in knots).' },
-    { path: 'props.outputRange', control: 'rangeEditor', tier: 'simple', group: 'Gauge', tooltip: 'What the value range maps to on screen — degrees of rotation, or px of translation/arc fill.' },
+    { path: 'props.transform', control: 'select', options: ['rotate', 'translate', 'arc-fill', 'arc'], tier: 'simple', group: 'Gauge', tooltip: 'How the bound value visually drives this gauge — a rotating needle, a sliding bar, a straight filling bar ("Arc Fill", despite the name), or a real curved arc sweep ("Arc", FDWS v1.20).' },
+    { path: 'props.pivot', control: 'text', tier: 'advanced', group: 'Gauge', tooltip: 'CSS transform-origin for the rotate transform, e.g. "50% 50%" to rotate around dead-center. Ignored by Translate/Arc Fill/Arc.', showWhen: { path: 'props.transform', equals: 'rotate' } },
+    { path: 'props.axis', control: 'select', options: ['x', 'y'], tier: 'advanced', group: 'Gauge', tooltip: 'Which axis Translate moves along, or which side Arc Fill sweeps from. Ignored by Rotate/Arc.', showWhen: { path: 'props.transform', equals: 'translate' } },
+    { path: 'props.clamp', control: 'checkbox', tier: 'advanced', group: 'Gauge', tooltip: 'Clamps the output to its declared range instead of overshooting past it. On by default. Applies to Arc too (clamps the fill ratio).' },
+    { path: 'props.valueRange', control: 'rangeEditor', tier: 'simple', group: 'Gauge', tooltip: 'The raw SimVar value span this gauge reads (e.g. 0–400 for airspeed in knots). For Arc, this is the only range needed — Output Range has no meaning there.' },
+    { path: 'props.outputRange', control: 'rangeEditor', tier: 'simple', group: 'Gauge', tooltip: 'What the value range maps to on screen — degrees of rotation, or px of translation/arc fill. Not used by Arc — its angular span is Arc Start/End Angle instead.', showWhen: { path: 'props.transform', notEquals: 'arc' } },
+
+    // FDWS v1.20 — a real curved SVG arc (stroke-dashoffset sweep), replacing
+    // the "arc-fill" scaleX rectangle hack for anything actually circular.
+    // GaugeComponent.renderArc()/update() read these directly off props.arc.
+    { path: 'props.arc.radius', control: 'number', tier: 'simple', group: 'Arc', tooltip: 'Arc radius, in units of a 0–100 viewBox (the gauge scales to fit its own box regardless). Default 40.', showWhen: { path: 'props.transform', equals: 'arc' } },
+    { path: 'props.arc.strokeWidth', control: 'number', tier: 'simple', group: 'Arc', tooltip: 'Stroke thickness of the track/bands/fill, same 0–100 viewBox units. Default 6.', showWhen: { path: 'props.transform', equals: 'arc' } },
+    { path: 'props.arc.startAngle', control: 'number', tier: 'simple', group: 'Arc', tooltip: 'Where the arc begins, in degrees clockwise from straight up (12 o\'clock) — same convention as core.selector\'s rotary Angle°. Default -120.', showWhen: { path: 'props.transform', equals: 'arc' } },
+    { path: 'props.arc.endAngle', control: 'number', tier: 'simple', group: 'Arc', tooltip: 'Where the arc ends, same convention as Start Angle. Default 120.', showWhen: { path: 'props.transform', equals: 'arc' } },
+    { path: 'props.arc.trackColor', control: 'color', tier: 'simple', group: 'Arc', tooltip: 'Background track color, always shown across the full sweep. Default a faint white.', showWhen: { path: 'props.transform', equals: 'arc' } },
+    { path: 'props.arc.color', control: 'color', tier: 'simple', group: 'Arc', tooltip: 'Fill color for the value-driven progress sweep.', showWhen: { path: 'props.transform', equals: 'arc' } },
+    { path: 'props.arc.showFill', control: 'checkbox', tier: 'advanced', group: 'Arc', tooltip: 'Shows the value-progress sweep on top of the track/bands. Turn off for a pure zone-marker ring with a separate rotating needle (another core.gauge) on top, instead of a fill-wipe style. On by default.', showWhen: { path: 'props.transform', equals: 'arc' } },
+    { path: 'props.arc.lineCap', control: 'select', options: ['round', 'butt'], tier: 'advanced', group: 'Arc', tooltip: 'End-cap style for the track and fill strokes (bands always use a flat "butt" cap so adjacent zones meet cleanly). Default round.', showWhen: { path: 'props.transform', equals: 'arc' } },
+    { path: 'props.arc.bands', control: 'arcBandsEditor', tier: 'advanced', group: 'Arc', tooltip: 'Static colored zone segments (caution/redline) — each {from, to} is a 0–1 ratio of the whole Value Range, not a raw value or an angle.', showWhen: { path: 'props.transform', equals: 'arc' } },
 
     // FDWS v1.5/v1.6 — a SECOND, independent transform layer, composed after
     // the primary one, with its own axis/clamp/ranges nested under it
@@ -384,7 +402,12 @@ export const TYPE_FIELDS = {
   ],
   'core.image': [
     { path: 'props.assetId', control: 'assetPicker', tier: 'simple', group: 'Content', tooltip: 'Image from this widget’s Asset Library to display.' },
-    { path: 'props.fit', control: 'select', options: ['cover', 'contain', 'tile'], tier: 'advanced', group: 'Content', tooltip: 'How the image fills its box.' }
+    { path: 'props.fit', control: 'select', options: ['cover', 'contain', 'tile'], tier: 'advanced', group: 'Content', tooltip: 'How the image fills its box.' },
+    // FDWS v1.20 §2: "inline" only has an effect when the chosen asset is an
+    // SVG — a PNG/JPEG/WEBP asset falls back to the normal <img> render
+    // regardless of this setting (nothing to inline). See props.renderMode's
+    // pairing with style.typography.color below.
+    { path: 'props.renderMode', control: 'select', options: ['img', 'inline'], tier: 'advanced', group: 'Content', tooltip: 'FDWS v1.20: "Inline SVG" injects an SVG asset as live markup instead of an opaque <img> — any shape inside it authored with fill="currentColor"/stroke="currentColor" then follows this component\'s Text Color field (below), including that field\'s own state-driven style.rules — so an instrument face can recolor at runtime instead of being permanently baked into one static image. No effect on non-SVG assets.' }
   ],
   'core.list': [
     { path: 'props.itemsBinding', control: 'stateVarPicker', tier: 'simple', group: 'Content', tooltip: 'Array-typed state variable this list renders one row per item from.' },
@@ -406,6 +429,25 @@ export const TYPE_FIELDS = {
   // group's existing controls.
   'core.divider': [
     { path: 'props.orientation', control: 'select', options: ['horizontal', 'vertical'], tier: 'simple', group: 'Content', fdwsMin: '1.17', tooltip: 'Line direction. Horizontal spans this component’s own width; vertical spans its own height — size the grid box accordingly (wide+short for horizontal, narrow+tall for vertical).' }
+  ],
+  // FDWS v1.20 §3: a continuously-scrolling ruler/tape (airspeed, altitude) —
+  // TapeComponent.js rebuilds the visible window of tick marks/labels from
+  // these numbers on every bound-value update, rather than reading a
+  // pre-drawn asset or a state[] array. The current value's own numeric
+  // readout is a separate core.display layered on top at the index line, not
+  // part of this component.
+  'core.tape': [
+    { path: 'props.axis', control: 'select', options: ['y', 'x'], tier: 'simple', group: 'Tape', fdwsMin: '1.20', tooltip: 'Scroll direction — vertical (airspeed/altitude-style) or horizontal (heading-tape-style).' },
+    { path: 'props.tickInterval', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', tooltip: 'Value spacing between minor ticks (e.g. 10 for an altitude tape in feet).' },
+    { path: 'props.majorEvery', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', tooltip: 'Every Nth minor tick is drawn longer and labeled with its value.' },
+    { path: 'props.pxPerUnit', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', tooltip: 'Pixels of scroll travel per 1 unit of value — controls how "zoomed in" the tape reads.' },
+    { path: 'props.minorTickLength', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', tooltip: 'Length in px of a minor tick mark.' },
+    { path: 'props.majorTickLength', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', tooltip: 'Length in px of a major (labeled) tick mark.' },
+    { path: 'props.tickColor', control: 'color', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', tooltip: 'Color of the tick marks.' },
+    { path: 'props.labelColor', control: 'color', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', tooltip: 'Color of the tick labels. Defaults to Tick Color if unset.' },
+    { path: 'props.indexLineColor', control: 'color', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', tooltip: 'Color of the fixed line marking the current reading, at the component\'s center.' },
+    { path: 'props.decimals', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', tooltip: 'Decimal places shown on major tick labels. Default 0.' },
+    { path: 'props.reverse', control: 'checkbox', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', tooltip: 'Flips scroll direction — higher values move toward the start instead of the end.' }
   ]
 };
 

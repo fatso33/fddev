@@ -128,6 +128,29 @@ export class CompositeWidget extends BaseWidget {
   }
 
   /**
+   * FDWS v1.20 §2: decoded SVG source text for an svg+xml asset, or null for any
+   * other mimeType (or a missing asset) — used by ImageComponent's
+   * `props.renderMode: "inline"` so an SVG can be injected as live markup instead
+   * of an opaque `<img>`, letting `fill="currentColor"`/`stroke="currentColor"`
+   * inside it follow this.element.style.color (BaseComponent.applyStyles()'s
+   * already fully theme-resolved output for style.typography.color).
+   * @param {string} assetId
+   * @returns {string|null}
+   */
+  resolveAssetSvgText(assetId) {
+    if (!assetId) return null;
+    const cleanId = assetId.replace(/^asset:\/\//, '');
+    const assets = this.definition?.assets || [];
+    const asset = assets.find((a) => a.id === cleanId);
+    if (!asset || !asset.data || asset.mimeType !== 'image/svg+xml') return null;
+    try {
+      return atob(asset.data);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
    * BaseComponent.applyStyles() calls this to theme-adjust every authored color —
    * the PWA has one global theme (the topbar's dark/light toggle), so this just
    * mirrors whatever it last set on <html data-theme>, same source main.css's own

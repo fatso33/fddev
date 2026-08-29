@@ -20,6 +20,7 @@ import { ListComponent } from './ListComponent.js';
 import { RefComponent } from './RefComponent.js';
 import { PadComponent } from './PadComponent.js';
 import { DividerComponent } from './DividerComponent.js';
+import { TapeComponent } from './TapeComponent.js';
 import { BaseComponent } from './BaseComponent.js';
 import { SecurityValidator } from '../../core/SecurityValidator.js';
 
@@ -60,7 +61,8 @@ export class ComponentRegistry {
     ['core.list', { type: 'core.list', classRef: ListComponent }],
     ['core.ref', { type: 'core.ref', classRef: RefComponent }],
     ['core.pad', { type: 'core.pad', classRef: PadComponent }],
-    ['core.divider', { type: 'core.divider', classRef: DividerComponent }]
+    ['core.divider', { type: 'core.divider', classRef: DividerComponent }],
+    ['core.tape', { type: 'core.tape', classRef: TapeComponent }]
   ]);
 
   /**
