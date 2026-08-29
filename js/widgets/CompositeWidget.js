@@ -89,10 +89,14 @@ export class CompositeWidget extends BaseWidget {
       if (entry.seedFromContext && this.popoverContext?.[entry.seedFromContext]) {
         initialVal = this.popoverContext[entry.seedFromContext].value;
       }
-      // FDWS v1.2 §3.2: persist:true is disallowed on array-typed state (bulk flight
-      // data isn't meant to round-trip through widget-local storage).
-      if (entry.type === 'array' && entry.persist) {
-        console.warn(`[CompositeWidget] State "${entry.name}" declares type:"array" with persist:true — persist is ignored for array-typed state per FDWS v1.2 §3.2.`);
+      // FDWS v1.2 §3.2 (loosened by v1.21): persist:true is disallowed on
+      // array-typed state only when it's ALSO live-synced (syncFrom set) —
+      // that combination is still nonsensical (a live feed like a flight plan
+      // or message queue is always re-synced fresh; a persisted local copy
+      // would just go stale and could conflict with the next sync). A plain
+      // local-only array (no syncFrom) is free to persist like any scalar.
+      if (entry.type === 'array' && entry.persist && entry.syncFrom) {
+        console.warn(`[CompositeWidget] State "${entry.name}" declares type:"array" with persist:true AND syncFrom — persist is ignored for a live-synced array per FDWS v1.2 §3.2/v1.21.`);
       }
       this.localState.set(entry.name, initialVal);
     });
@@ -547,9 +551,12 @@ export class CompositeWidget extends BaseWidget {
     }
     this.localState.set(name, value);
 
-    // Check if declared with persist: true (array-typed state never persists — §3.2)
+    // Check if declared with persist: true. A live-synced array (type:"array"
+    // with syncFrom) never persists — §3.2/v1.21, see initLocalState()'s
+    // fuller comment — but a local-only array (no syncFrom) persists the
+    // same as any scalar.
     const stateDecl = this.definition?.state?.find((s) => s.name === name);
-    if (persist && stateDecl?.persist && stateDecl?.type !== 'array') {
+    if (persist && stateDecl?.persist && !(stateDecl?.type === 'array' && stateDecl?.syncFrom)) {
       if (!this.config.state) this.config.state = {};
       this.config.state[name] = value;
       this.eventBus.publish('WIDGET_CONFIG_CHANGED', { widgetId: this.id, config: this.config });
