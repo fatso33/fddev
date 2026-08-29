@@ -62,7 +62,12 @@ export class SettingsView {
       // (see SimBridge.getResolvedUrl) — fetch from its resolved HTTP origin,
       // not the page's own origin, or this always 404s off-PC.
       const wsUrl = this.simBridge ? this.simBridge.getResolvedUrl() : null;
-      const httpOrigin = wsUrl ? wsUrl.replace(/^ws/, 'http') : '';
+      // wss:// now a real possibility (PC Bridge serves TLS — see
+      // certManager.js) — a bare /^ws/ replace turns "wss://" into the
+      // invalid "httpss://" (only the "ws" prefix matches, "s" is left
+      // behind), so the scheme's trailing "s" has to be preserved/dropped
+      // explicitly rather than assumed away.
+      const httpOrigin = wsUrl ? wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:') : '';
       const res = await fetch(`${httpOrigin}/api/bridge-info`);
       if (res.ok) {
         this.networkInfo = await res.json();
@@ -228,6 +233,16 @@ export class SettingsView {
             ${customUrl ? `<button id="btn-reset-bridge-url" class="btn-secondary" title="Reset to auto-detect">Auto</button>` : ''}
           </div>
           <div id="settings-feedback-msg" class="settings-feedback"></div>
+          ${currentWsUrl.startsWith('wss:') ? `
+          <div class="settings-hint" style="margin-top: 8px;">
+            PC Bridge uses a self-signed certificate for this secure (<code>wss://</code>) connection —
+            a browser can't accept it during a WebSocket handshake, so the first time you connect from
+            this device, open the trust page below and accept the "connection isn't private" warning once.
+            <br/>
+            <a href="${currentWsUrl.replace(/^wss:/, 'https:')}/api/health" target="_blank" rel="noopener" class="btn-secondary" style="display: inline-block; margin-top: 6px; text-decoration: none;">
+              Open Trust Page
+            </a>
+          </div>` : ''}
         </div>
       </section>
 

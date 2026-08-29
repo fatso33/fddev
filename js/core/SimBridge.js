@@ -309,6 +309,18 @@ export class SimBridge {
       this.eventBus.publish('SIM_STATUS', { connected: !!packet.connected });
       return;
     }
+
+    // PC Bridge just live-rebuilt its SimConnect data definitions after a
+    // binding edit (unit/SimVar fixed, or the active profile switched) — see
+    // server.js's rebuildDynamicSimVarChunks(). The corrected values will
+    // start arriving on their own via the normal periodic simData stream,
+    // but request a fresh snapshot right away too so a widget that's been
+    // sitting on stale/no data doesn't have to wait out the next tick.
+    if (packet.type === 'SIMVAR_BINDINGS_UPDATED') {
+      this.requestFullState();
+      this.eventBus.publish('SIMVAR_BINDINGS_UPDATED', {});
+      return;
+    }
   }
 
   /**
