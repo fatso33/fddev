@@ -24,6 +24,10 @@
  * @property {(f1: string, f2: string) => void} swapLocalState
  * @property {() => object} getAllStateObject
  * @property {(componentId: string) => {update: (val: any, allState: object) => void}|undefined} getRenderer
+ * @property {() => void} [flushPendingEdits] - forces any dirty `core.input` renderer to
+ *   commit its pending edit immediately, ahead of a 'tap'/'longpress' action. Implemented
+ *   by every host that tracks its own renderers (CompositeWidget, MockWidgetHost); safe to
+ *   omit (see `runInteraction`'s own doc comment for why this exists).
  * @property {(feedback: any) => void} [playFeedback] - CompositeWidget-only; no-op elsewhere.
  * @property {(opts: {hostWidget: object, popoverWidgetId: string, contextDecl: object}) => void} [openWidgetPopover]
  *   - present on hosts that can actually open a popover modal (CompositeWidget, MockWidgetHost).
@@ -46,12 +50,29 @@ import { readStateRef } from '../utils/StateRefPath.js';
  * `action` against `host`. Mirrors CompositeWidget.js's original `handleInteraction()`
  * exactly — same trigger-matching, same per-action-type behavior, same fallback rules.
  *
+ * A 'tap'/'longpress' first calls `host.flushPendingEdits?.()` — a masked `core.input`
+ * (FDWS v1.11) only actually commits its typed value to local state on a native
+ * 'blur'/'change' DOM event, not on every keystroke, and that event's default browser
+ * focus-shift ordering (blur-before-click) isn't something worth depending on across
+ * every browser/WebView combination a device could be running. Without this, a "Save"
+ * button whose action reads that local-state value (e.g. core.commitToHost) can fire
+ * before the input's own pending edit ever landed — reproduced 2026-08-29 with a COM
+ * preset popover: typing a frequency and tapping Save committed the input's stale/empty
+ * seeded value instead of what was actually typed, because nothing forced the edit to
+ * commit first. `flushPendingEdits` is optional on `host` (only hosts that track
+ * `core.input` renderers implement it) and a no-op when there's nothing pending.
+ * Scoped to tap/longpress only so a component's own 'blur'/'change'/'focus' interactions
+ * (if declared) don't recursively re-trigger this.
  * @param {InteractionHost} host
  * @param {object} compDef - component definition (needs `.id`, `.binding`, `.interactions`)
  * @param {string} trigger - 'tap' | 'longpress' | 'change' | 'focus' | 'blur' | …
  * @param {object} [eventData]
  */
 export function runInteraction(host, compDef, trigger, eventData = {}) {
+  if (trigger === 'tap' || trigger === 'longpress') {
+    host.flushPendingEdits?.();
+  }
+
   const interactions = compDef.interactions || [];
   const matching = interactions.filter((i) => i.trigger === trigger);
 

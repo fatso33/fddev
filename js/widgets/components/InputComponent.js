@@ -27,6 +27,13 @@ export class InputComponent extends BaseComponent {
     inputEl.inputMode = props.format?.includes('INT') || props.format?.includes('FREQ') || props.format?.includes('BCD') ? 'decimal' : 'text';
     inputEl.autocomplete = 'off';
     inputEl.spellcheck = false;
+    // Every core.input on a page is its own independent field, never part of a
+    // multi-step form — the on-screen keyboard's "Enter" action should just
+    // dismiss it (matching the keydown handler below), not advance focus to
+    // whatever DOM-order-next input happens to be nearby (e.g. COM1 STBY ->
+    // COM2 STBY when COM2 is visible). Without this, mobile keyboards infer
+    // a "next" action from focusable-element order rather than "done".
+    inputEl.enterKeyHint = 'done';
 
     if (props.placeholder) {
       inputEl.placeholder = props.placeholder;
@@ -199,6 +206,24 @@ export class InputComponent extends BaseComponent {
       this.inputNode.value = val;
       this.lastValidDisplay = val;
       if (this.formatSpec) this.maskBuffer = this.digitsFromDisplay(val);
+    }
+  }
+
+  /**
+   * Forces any pending (typed-but-not-yet-committed) edit to commit right now,
+   * without waiting for a native 'blur'/'change' DOM event. Called by
+   * InteractionDispatcher.js before a 'tap'/'longpress' action runs elsewhere in
+   * this widget (e.g. a popover's Save button reading this field's committed
+   * state) — a real blur normally beats that tap under standard browser focus-
+   * shift ordering, but that ordering isn't something this component can rely
+   * on across every browser/WebView, and there's no reason to when the actual
+   * commit logic is just a direct method call away. No-ops when there's
+   * nothing pending (this.dirty is false).
+   */
+  flushPendingEdit() {
+    if (this.dirty && this.inputNode) {
+      this.validateAndCommit(this.inputNode.value);
+      this.dirty = false;
     }
   }
 

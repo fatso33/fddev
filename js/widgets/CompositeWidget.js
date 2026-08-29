@@ -482,6 +482,7 @@ export class CompositeWidget extends BaseWidget {
       swapLocalState: (f1, f2) => this.swapLocalState(f1, f2),
       getAllStateObject: () => this.getAllStateObject(),
       getRenderer: (id) => this.componentRenderers.get(id),
+      flushPendingEdits: () => this.flushPendingEdits(),
       playFeedback: (feedback) => { if (feedback) this.playFeedback(feedback); },
       openPropertyInspector: () => this.eventBus.publish('OPEN_PROPERTY_INSPECTOR', { widgetId: this.id }),
       // FDWS v1.3 Widget Popovers: opens a `kind:"popover"` widget definition in a
@@ -497,6 +498,21 @@ export class CompositeWidget extends BaseWidget {
       onClosePopover: this.onClosePopover ? () => this.onClosePopover() : undefined,
       onUnhandledActionType: (type) => console.warn(`[CompositeWidget] Unhandled action type: ${type}`)
     }, compDef, trigger, eventData);
+  }
+
+  /**
+   * Forces any `core.input` renderer with a pending (typed-but-uncommitted) edit to
+   * commit right now, ahead of a 'tap'/'longpress' action elsewhere in this widget
+   * (see InteractionDispatcher.js's `runInteraction` doc comment for the bug this
+   * closes). Iterates all mounted renderers rather than tracking "the" focused one
+   * since this widget could in principle have more than one core.input, though only
+   * the actually-focused, actually-dirty one (if any) ever does real work here —
+   * InputComponent.flushPendingEdit() itself no-ops otherwise.
+   */
+  flushPendingEdits() {
+    this.componentRenderers.forEach((renderer) => {
+      renderer.flushPendingEdit?.();
+    });
   }
 
   /**
