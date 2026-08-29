@@ -375,7 +375,7 @@ export class FlightDeckApp {
     });
 
     // Runtime Widget Configuration Changes (Presets, Custom State, etc.)
-    this.eventBus.subscribe('WIDGET_CONFIG_CHANGED', async ({ widgetId, config }) => {
+    this.eventBus.subscribe('WIDGET_CONFIG_CHANGED', async ({ widgetId, config, sessionOnly }) => {
       if (!this.activeProfile) return;
       const page = this.activeProfile.getPage(this.activePageId);
       if (page) {
@@ -383,7 +383,12 @@ export class FlightDeckApp {
         // apply to every stored copy of this widget id, across both
         // orientations AND both device tiers -- config values are shared
         // regardless of which layout the widget instance happens to be
-        // placed in, unlike position/size which is per-tier.
+        // placed in, unlike position/size which is per-tier. This part
+        // happens for BOTH persist:true and FDWS v1.22's persist:"session" —
+        // it's what makes a widget instance destroyed and rebuilt by
+        // switchPage() (e.g. navigating away and back within the running
+        // app) see the value again, since it lives on this in-memory
+        // Page/Profile object, not on the doomed widget instance itself.
         ['mobile', 'tablet'].forEach((tier) => {
           page.updateWidget(widgetId, { config }, 'portrait', false, tier);
           page.updateWidget(widgetId, { config }, 'landscape', false, tier);
@@ -396,6 +401,13 @@ export class FlightDeckApp {
         if (this.activeProfile.parentProfileId && !this.activeProfile.hasOwnPage(page.id)) {
           this.activeProfile.promoteToOwnPage(page.id);
         }
+        // FDWS v1.22: persist:"session" stops here — the in-memory update
+        // above already makes it survive a page switch, but it must NOT
+        // reach IndexedDB, or it would durably outlive the current app
+        // session (the whole point of "session" over plain persist:true).
+        // It's gone the next time the app actually reloads this profile
+        // from disk, since that copy was never written.
+        if (sessionOnly) return;
         try {
           await this.storage.saveProfile(this.activeProfile.toJSON(), false);
         } catch (err) {
