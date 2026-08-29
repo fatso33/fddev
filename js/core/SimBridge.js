@@ -285,9 +285,17 @@ export class SimBridge {
       return;
     }
 
-    // Handle Telemetry frame
+    // Handle Telemetry frame. packet.data is the normal shape (a flat
+    // simVarName -> value map); the `packet` fallback supports a legacy
+    // format that put simvars directly at the top level (no wrapper at
+    // all — see the `packet.com1_act !== undefined` sniff above). The two
+    // are mutually exclusive: whichever one contains real values, use it
+    // alone. The previous `{ ...packet.data, ...packet }` merge always
+    // re-added packet's own envelope keys (`type`, `profile`, and `data`
+    // itself, redundantly) on top, silently queuing three bogus "simvar"
+    // entries into every telemetry frame that had a `.data` wrapper at all.
     if (packet.type === 'simData' || packet.data || packet.com1_act !== undefined) {
-      const telemetry = packet.data ? { ...packet.data, ...packet } : packet;
+      const telemetry = packet.data || packet;
       this.eventBus.ingestTelemetry(telemetry);
       return;
     }
