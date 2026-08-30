@@ -10,6 +10,7 @@
   --well-border: #1f2533;
   --accent-green: #00ff3c;
   --accent-cyan: #00d8f6;
+  --accent-magenta: #ff2ee0;
   --accent-amber: #ffaa00;
   --accent-error: #ff3344;
   --text-white: #ffffff;
@@ -39,6 +40,7 @@
   --well-border: #cbd5e1;
   --accent-green: #008726;
   --accent-cyan: #007a99;
+  --accent-magenta: #b3007a;
   --accent-amber: #b45309;
   --accent-error: #dc2626;
   --text-white: #111827;
@@ -133,27 +135,6 @@ body {
   flex-shrink: 0;
 }
 
-.status-indicators {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.wifi-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--badge-bg);
-  border: 1px solid var(--badge-border);
-  transition: all 0.2s ease;
-}
-
-.wifi-badge.connected svg { stroke: var(--accent-green); }
-.wifi-badge.disconnected svg { stroke: var(--accent-error); }
-
 .aircraft-badge {
   background: var(--badge-bg);
   border: 1px solid var(--badge-border);
@@ -168,10 +149,10 @@ body {
 }
 
 .garmin-menu-btn {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  /* Deliberately NOT centered (was position:absolute + left:50%) — a
+     dead-center button collides with a phone's camera cutout in portrait,
+     which is exactly the space Fullscreen mode's status-bar removal made
+     this button newly vulnerable to. Left-aligned flex child instead. */
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 8px;
@@ -182,6 +163,22 @@ body {
   cursor: pointer;
   box-shadow: 0 2px 8px var(--shadow-color);
   color: var(--text-white);
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Connection status, folded into the menu button itself (replaces the old
+   separate PC Bridge / Simulator status dots) — see app.js's BRIDGE_STATUS/
+   SIM_STATUS subscriptions. Simulator connected implies PC Bridge is too,
+   so .sim-connected's magenta takes priority over .bridge-connected's cyan
+   whenever both classes are present. */
+.garmin-menu-btn.bridge-connected {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+.garmin-menu-btn.sim-connected {
+  color: var(--accent-magenta);
+  border-color: var(--accent-magenta);
 }
 
 /* Dropdown Menu Drawer */

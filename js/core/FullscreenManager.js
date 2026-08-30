@@ -17,9 +17,18 @@
 const STORAGE_KEY = 'flightdeck_fullscreen_enabled';
 
 export class FullscreenManager {
-  constructor() {
+  /**
+   * @param {{ onEnter?: () => void }} [options] onEnter fires every time
+   *   fullscreen is actually entered (including the auto-resume-on-next-
+   *   gesture path) -- used to show our own instructions, since Android's
+   *   own "press Back to exit full screen" system toast is inaccurate here
+   *   (there's no in-app Back target) and can't be suppressed or edited
+   *   from the page itself.
+   */
+  constructor({ onEnter } = {}) {
     this.enabled = localStorage.getItem(STORAGE_KEY) === 'true'; // default off
     this.supported = !!(document.documentElement.requestFullscreen && document.exitFullscreen);
+    this.onEnter = onEnter;
     this._checkbox = null;
     this._resumeArmed = false;
 
@@ -42,6 +51,7 @@ export class FullscreenManager {
     if (!this.supported || document.fullscreenElement) return;
     try {
       await document.documentElement.requestFullscreen();
+      this.onEnter?.();
     } catch (_) {
       // Not called from within a user gesture, or denied — silently no-op;
       // _armResumeOnNextGesture() catches the next real tap instead.

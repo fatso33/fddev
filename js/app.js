@@ -209,7 +209,14 @@ export class FlightDeckApp {
     this.wakeLock.bindToggle(document.getElementById('wakelock-toggle-checkbox'));
     this.wakeLock.acquire();
 
-    this.fullscreen = new FullscreenManager();
+    this.fullscreen = new FullscreenManager({
+      // Android shows its own "press Back to exit full screen" system
+      // toast on entering fullscreen, which can't be edited or suppressed
+      // from the page and is wrong here (nothing in this app maps to a
+      // Back action) -- this toast follows right after it with the actual
+      // instructions, rather than trying to fight the OS's own message.
+      onEnter: () => this.showToast('Fullscreen on — use the Fullscreen toggle in the menu to show the status bar again.')
+    });
     this.fullscreen.bindToggle(document.getElementById('fullscreen-toggle-checkbox'));
   }
 
@@ -284,20 +291,22 @@ export class FlightDeckApp {
   }
 
   initEventSubscriptions() {
-    // Bridge connection status indicator
+    // Connection status is folded into the menu button itself (see
+    // main.css's .garmin-menu-btn.bridge-connected/.sim-connected) rather
+    // than shown as separate indicator dots -- sim-connected implies
+    // bridge-connected, so it takes priority (magenta over cyan) whenever
+    // both are true. Tracked as flags since either event can fire alone.
+    this.bridgeConnected = false;
+    this.simConnected = false;
+
     this.eventBus.subscribe('BRIDGE_STATUS', ({ connected }) => {
-      const badge = document.getElementById('sim-status');
-      if (badge) {
-        badge.className = `wifi-badge ${connected ? 'connected' : 'disconnected'}`;
-      }
+      this.bridgeConnected = connected;
+      this.updateMenuButtonStatus();
     });
 
-    // Simulator (SimConnect) connection status indicator
     this.eventBus.subscribe('SIM_STATUS', ({ connected }) => {
-      const badge = document.getElementById('sim-connect-status');
-      if (badge) {
-        badge.className = `wifi-badge ${connected ? 'connected' : 'disconnected'}`;
-      }
+      this.simConnected = connected;
+      this.updateMenuButtonStatus();
     });
 
     // Telemetry updates for profile name
@@ -420,6 +429,13 @@ export class FlightDeckApp {
         }
       }
     });
+  }
+
+  updateMenuButtonStatus() {
+    const btn = document.getElementById('menu-toggle-btn');
+    if (!btn) return;
+    btn.classList.toggle('bridge-connected', this.bridgeConnected);
+    btn.classList.toggle('sim-connected', this.simConnected);
   }
 
   showToast(message) {
