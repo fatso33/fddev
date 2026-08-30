@@ -20,6 +20,46 @@
   transition: all 0.2s ease;
 }
 
+/* Corner Overlay — hosts the two app-global corner widgets (menu toggle,
+   App Profile badge; see FlightDeckApp.renderActivePage()/
+   getCornerWidgetLayouts() in app.js) floated directly over the real page
+   grid's own top-left/top-right cells, so real widgets placed in the same
+   rows render in the same visual band, not below a separate strip. Rebuilt
+   fresh as the first child of #content-area on every renderActivePage()
+   call (all branches, including Settings/rotate-prompt) rather than kept
+   alive outside it -- these two widgets carry no bindings/state, so
+   destroy+recreate is cheap and avoids the extra lifecycle machinery a
+   persistent container would need.
+
+   position:sticky + height:0 + overflow:visible is the "pin without
+   consuming layout space" pattern: the container itself never pushes
+   #content-area's real content down (the page grid's row 1 starts at the
+   very top, unchanged), yet it stays glued to the top of #content-area's
+   scroll instead of scrolling away with the rest of the page, and its
+   children can render past its own zero-height box. Reuses the exact same
+   custom-property-driven CSS Grid pattern as .fd-page-grid above (set via
+   the same LayoutEngine.applyGridToContainer()) so its column math is
+   pixel-identical to the real grid whenever both are given the same
+   gridSpec. pointer-events:none on the container (so clicks/scrolling pass
+   through to real widgets in the reserved-but-otherwise-empty middle
+   columns of rows 1-2); app.js sets pointer-events:auto directly on the two
+   mounted corner widget elements. */
+.fd-corner-overlay {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-cols, 20), minmax(0, 1fr));
+  grid-auto-rows: var(--row-height, 16px);
+  gap: var(--grid-gap, 8px);
+  width: 100%;
+  position: sticky;
+  top: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  /* Above ordinary widgets (.fd-widget is z-index:1) but below modals
+     (10000) and the rotate prompt (8000, below). */
+  z-index: 5;
+}
+
 /* Edit Mode Grid Guides Overlay */
 .fd-page-grid.edit-mode-active {
   background-image:
@@ -128,6 +168,20 @@
   -webkit-user-select: none;
   isolation: isolate;
   z-index: 1;
+}
+
+/* The two fixed 2-row-tall corner widgets (menu toggle, App Profile badge)
+   render inside .fd-corner-overlay above at exactly 2 grid rows worth of
+   pixels (e.g. 2*18px row-height + 3px gap = 39px in mobile landscape) --
+   less than .fd-widget's 44px touch-target floor above, which would
+   otherwise stretch their box taller than their allocated grid cell and
+   visibly bleed into the real widget row directly below them (CSS Grid
+   doesn't grow a track to accommodate an oversized item's min-height, so
+   the item just overflows its cell instead). Reset it here so their
+   rendered height always exactly matches their 2-row grid allocation. */
+[data-widget-id="__corner_menu__"],
+[data-widget-id="__corner_profile__"] {
+  min-height: 0;
 }
 
 .fd-widget.edit-active {

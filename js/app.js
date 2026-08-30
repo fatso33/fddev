@@ -57,6 +57,17 @@ export class FlightDeckApp {
     this.profileSelector = null;
     this.rotatePrompt = null;
 
+    // Corner widgets (menu toggle + App Profile badge) -- fixed,
+    // non-draggable, non-removable fixtures floated over the real page
+    // grid's top-left/top-right cells (see .fd-corner-overlay,
+    // mountCornerWidgets()). Destroyed and recreated on every
+    // renderActivePage() call, all branches -- see that method -- so these
+    // fields are reassigned every render, not set once at startup.
+    this.cornerWidgetInstances = [];
+    this.menuToggleWidget = null;
+    this.appProfileWidget = null;
+    this.editToolbarVisible = true;
+
     this.contentArea = document.getElementById('content-area');
     this.gridContainer = null;
     this.orientationUnsub = null;
@@ -98,7 +109,9 @@ export class FlightDeckApp {
       this.handleOrientationChange(newOrientation, isResize);
     });
 
-    // 8. Mount and render current active page
+    // 8. Mount and render current active page -- this also builds the
+    // corner overlay (menu toggle + App Profile badge) on every branch, see
+    // renderActivePage()/mountCornerWidgets().
     this.renderPageMenu();
     this.renderActivePage();
 
@@ -120,32 +133,20 @@ export class FlightDeckApp {
   }
 
   initHeaderControls() {
-    // Aircraft Profile Badge long-press -> Open Profile Selector
-    // (Long-press, not tap, so a stray touch on the badge while glancing at
-    // the connection/aircraft status can't accidentally pop the App
-    // Profiles switcher open mid-flight.)
-    const aircraftBadge = document.getElementById('aircraft-model');
-    if (aircraftBadge) {
-      aircraftBadge.textContent = this.activeProfile.name.toUpperCase().slice(0, 7);
-      this.attachLongPressOpen(aircraftBadge, () => {
-        if (this.profileSelector) this.profileSelector.open();
-      });
-    }
-
-    // Garmin Center Menu Toggle
-    const menuBtn = document.getElementById('menu-toggle-btn');
+    // Menu button click and App Profile badge long-press are wired per
+    // renderActivePage() call instead (see wireCornerInteractions()), since
+    // both corner widgets are destroyed and recreated on every render, not
+    // created once here the way the old static index.html elements were.
     const menuDropdown = document.getElementById('menu-dropdown');
-    if (menuBtn && menuDropdown) {
-      menuBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const editBtn = document.getElementById('menu-edit-mode-btn');
-        if (editBtn) {
-          editBtn.style.display = (this.activePageId === 'page_settings') ? 'none' : 'flex';
-        }
-        menuDropdown.classList.toggle('open');
-      });
-
+    if (menuDropdown) {
+      // Outside-click closes the nav dropdown -- attached once here (NOT
+      // inside wireCornerInteractions(), which reruns every render; a
+      // document-level listener attached there would accumulate forever
+      // across renderActivePage() calls). Reads this.menuToggleWidget live
+      // at click time rather than capturing it, since that instance is
+      // replaced on every render.
       document.addEventListener('click', (e) => {
+        const menuBtn = this.menuToggleWidget?.element;
         if (!menuDropdown.contains(e.target) && e.target !== menuBtn) {
           menuDropdown.classList.remove('open');
         }
@@ -260,9 +261,8 @@ export class FlightDeckApp {
       onProfileChanged: async (newProfileId) => {
         const raw = await this.storage.getProfile(newProfileId);
         this.activeProfile = await this.activateProfile(raw);
-        const aircraftBadge = document.getElementById('aircraft-model');
-        if (aircraftBadge) {
-          aircraftBadge.textContent = this.activeProfile.name.toUpperCase().slice(0, 7);
+        if (this.appProfileWidget) {
+          this.appProfileWidget.setLabel(this.activeProfile.name.toUpperCase().slice(0, 7));
         }
         this.renderPageMenu();
         this.renderActivePage();
@@ -311,9 +311,8 @@ export class FlightDeckApp {
 
     // Telemetry updates for profile name
     this.eventBus.subscribe('TELEMETRY_STREAM', (data) => {
-      if (data.profile) {
-        const badge = document.getElementById('aircraft-model');
-        if (badge) badge.textContent = data.profile.toUpperCase().slice(0, 7);
+      if (data.profile && this.appProfileWidget) {
+        this.appProfileWidget.setLabel(data.profile.toUpperCase().slice(0, 7));
       }
     });
 
@@ -373,9 +372,8 @@ export class FlightDeckApp {
       const raw = await this.storage.getProfile(activeProfId);
       if (raw) {
         this.activeProfile = await this.activateProfile(raw);
-        const aircraftBadge = document.getElementById('aircraft-model');
-        if (aircraftBadge) {
-          aircraftBadge.textContent = this.activeProfile.name.toUpperCase().slice(0, 7);
+        if (this.appProfileWidget) {
+          this.appProfileWidget.setLabel(this.activeProfile.name.toUpperCase().slice(0, 7));
         }
         this.renderPageMenu();
         if (this.activePageId !== 'page_settings' && !this.isEditMode) {
@@ -432,10 +430,14 @@ export class FlightDeckApp {
   }
 
   updateMenuButtonStatus() {
-    const btn = document.getElementById('menu-toggle-btn');
-    if (!btn) return;
-    btn.classList.toggle('bridge-connected', this.bridgeConnected);
-    btn.classList.toggle('sim-connected', this.simConnected);
+    // BRIDGE_STATUS/SIM_STATUS can fire before the corner overlay's first
+    // renderActivePage() call has mounted the menu widget (simBridge.connect()
+    // runs earlier in init()) -- guard rather than assuming it already exists.
+    if (!this.menuToggleWidget) return;
+    this.menuToggleWidget.setConnectionStatus({
+      bridgeConnected: this.bridgeConnected,
+      simConnected: this.simConnected
+    });
   }
 
   showToast(message) {
@@ -479,9 +481,23 @@ export class FlightDeckApp {
   }
 
   renderActivePage() {
-    // Clean up active widget instances
+    const currentWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    const currentHeight = typeof window !== 'undefined' ? window.innerHeight : 768;
+    const orientation = this.layoutEngine.getOrientation(currentWidth, currentHeight);
+    this.currentOrientation = orientation;
+    const deviceTier = LayoutEngine.getDeviceTier(currentWidth, currentHeight);
+    this.currentDeviceTier = deviceTier;
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.dataset.deviceTier = deviceTier;
+    }
+
+    // Clean up active + corner widget instances
     this.activeWidgetInstances.forEach((w) => w.destroy());
     this.activeWidgetInstances = [];
+    this.cornerWidgetInstances.forEach((w) => w.destroy());
+    this.cornerWidgetInstances = [];
+    this.menuToggleWidget = null;
+    this.appProfileWidget = null;
 
     // Clean up settings view if previously mounted
     if (this.settingsView) {
@@ -489,6 +505,19 @@ export class FlightDeckApp {
     }
 
     this.contentArea.innerHTML = '';
+
+    // Corner overlay (menu toggle + App Profile badge) -- built as the
+    // first child of #content-area on EVERY branch below (Settings,
+    // no-page, rotate-prompt, normal), since these two widgets must always
+    // be visible and are never stored per-page/profile data (they're
+    // destroyed above and rebuilt fresh every render -- cheap, since they
+    // carry no bindings/state). Uses the current page's own gridSpec when
+    // one resolves (so column math matches the real grid exactly, even if a
+    // page ever declares a custom grid), falling back to the tier default
+    // for 'page_settings' (no real Page entry) or an as-yet-unresolved page.
+    let page = this.activePageId === 'page_settings' ? null : this.activeProfile.getPage(this.activePageId);
+    const gridSpecForCorners = (page && page.getGrid(orientation, deviceTier)) || LayoutEngine.getGridSpec(orientation, deviceTier);
+    this.mountCornerWidgets(orientation, deviceTier, gridSpecForCorners);
 
     // If active page is Settings, render the static non-editable Settings View
     if (this.activePageId === 'page_settings') {
@@ -502,8 +531,8 @@ export class FlightDeckApp {
       return;
     }
 
-    // Get current page
-    let page = this.activeProfile.getPage(this.activePageId);
+    // Get current page (falls back to the profile's first page if the
+    // stored activePageId no longer resolves to anything)
     if (!page) {
       page = this.activeProfile.pages[0];
       if (page) this.activePageId = page.id;
@@ -517,23 +546,6 @@ export class FlightDeckApp {
       this.gridContainer.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: var(--text-dim); padding: 40px 0;">No avionics widgets on this page.</div>`;
       this.contentArea.appendChild(this.gridContainer);
       return;
-    }
-
-    const currentWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
-    const currentHeight = typeof window !== 'undefined' ? window.innerHeight : 768;
-    const orientation = this.layoutEngine.getOrientation(currentWidth, currentHeight);
-    this.currentOrientation = orientation;
-
-    // Classify device tier (mobile vs tablet/desktop, by min viewport
-    // dimension) and select the grid dimension for it: mobile keeps the
-    // 20x44/44x20 grid, tablet/desktop gets a much finer 60x88/88x60 grid.
-    // Each tier's widget layout is stored and authored completely
-    // independently -- same pattern as portrait vs landscape, just one axis
-    // over. Exposed on the body dataset too for CSS.
-    const deviceTier = LayoutEngine.getDeviceTier(currentWidth, currentHeight);
-    this.currentDeviceTier = deviceTier;
-    if (typeof document !== 'undefined' && document.body) {
-      document.body.dataset.deviceTier = deviceTier;
     }
 
     // Orientation-lock enforcement (currently only page_yoke declares
@@ -578,10 +590,20 @@ export class FlightDeckApp {
     // user deliberately left. Use the edit toolbar's explicit "Compact"
     // action to actually close gaps.
     const compacted = this.layoutEngine.normalizeLayout(widgets || []);
-    page.setWidgets(orientation, deviceTier, compacted);
+
+    // Saved layouts from before the corner-widget feature existed may have
+    // real widgets sitting in row 1-2 cells the menu/App Profile corners now
+    // occupy -- push anything overlapping a reserved cell out of the way on
+    // every render (see resolveListWithReservedCorners()). Only written back
+    // into the live in-memory Profile here, same as normalizeLayout() above
+    // -- it isn't durably persisted to storage unless the user enters edit
+    // mode and Saves.
+    const reservedForReflow = this.getReservedCornerEntries(orientation, deviceTier, gridSpec);
+    const finalWidgets = this.resolveListWithReservedCorners(compacted, reservedForReflow);
+    page.setWidgets(orientation, deviceTier, finalWidgets);
 
     // Instantiate and mount all widgets
-    compacted.forEach((wConfig) => {
+    finalWidgets.forEach((wConfig) => {
       const widgetInstance = WidgetRegistry.createWidget(wConfig, this.eventBus);
       widgetInstance.mount(this.gridContainer);
       widgetInstance.setEditMode(this.isEditMode);
@@ -589,10 +611,16 @@ export class FlightDeckApp {
       this.activeWidgetInstances.push(widgetInstance);
     });
 
-    // If edit toolbar is active, keep it visible and update orientation badge
+    // If edit toolbar is active, keep it visible (unless the user manually
+    // hid it via the menu corner widget's pencil toggle -- see
+    // toggleEditToolbarVisibility()) and update orientation badge
     if (this.isEditMode) {
       this.editToolbar.setOrientation(orientation);
-      this.editToolbar.show();
+      if (this.editToolbarVisible) {
+        this.editToolbar.show();
+      } else {
+        this.editToolbar.hide();
+      }
     } else {
       this.editToolbar.hide();
     }
@@ -602,6 +630,178 @@ export class FlightDeckApp {
     } else {
       this.virtualYoke.stop();
     }
+  }
+
+  /**
+   * Computes the fixed corner layouts for the menu toggle (top-left, 3x2)
+   * and App Profile badge (top-right, 5x2), scaled proportionally from the
+   * same 20-col-portrait/44-col-landscape mobile reference every other
+   * widget's defaultLayout is authored against -- same declaredForCols
+   * scaling addNewWidgetToPage() already uses for ordinary widgets.
+   * @param {'portrait'|'landscape'} orientation
+   * @param {'mobile'|'tablet'} deviceTier
+   * @param {{columns:number}} gridSpec
+   */
+  getCornerWidgetLayouts(orientation, deviceTier, gridSpec) {
+    const declaredForCols = orientation === 'landscape' ? 44 : 20;
+    const scale = (declaredW) => Math.max(1, Math.min(gridSpec.columns, Math.round((declaredW / declaredForCols) * gridSpec.columns)));
+    const menuW = scale(3);
+    const profileW = scale(5);
+    return {
+      menu: {
+        id: '__corner_menu__',
+        type: 'MenuToggleWidget',
+        layout: { col: 1, row: 1, w: menuW, h: 2 },
+        config: { removable: false, appEditMode: this.isEditMode }
+      },
+      profile: {
+        id: '__corner_profile__',
+        type: 'AppProfileWidget',
+        layout: { col: Math.max(1, gridSpec.columns - profileW + 1), row: 1, w: profileW, h: 2 },
+        config: { removable: false, label: this.activeProfile ? this.activeProfile.name.toUpperCase().slice(0, 7) : 'DEFAULT' }
+      }
+    };
+  }
+
+  /**
+   * The same two corner positions as getCornerWidgetLayouts(), reduced to
+   * the {id, layout} shape LayoutEngine's collision functions already
+   * expect -- spliced into a widgetList at every collision-aware call site
+   * (addNewWidgetToPage, attachDragHandlers's endDrag,
+   * handleUpdateWidgetConfig, handleCompactLayout, handleMirrorLayout) so
+   * real widgets are never auto-placed or dragged into a corner cell, then
+   * filtered back out before the result is written via page.setWidgets() --
+   * this reservation is virtual/computed, never persisted (the corner
+   * widgets are app-global, not page content).
+   */
+  getReservedCornerEntries(orientation, deviceTier, gridSpec) {
+    const { menu, profile } = this.getCornerWidgetLayouts(orientation, deviceTier, gridSpec);
+    return [
+      { id: menu.id, layout: menu.layout },
+      { id: profile.id, layout: profile.layout }
+    ];
+  }
+
+  /**
+   * Resolves a widgetList's layout via LayoutEngine.resolveLayoutWithPushDown()
+   * as normal (movingId authoritative at targetLayout, colliding real
+   * widgets pushed down) and THEN makes one additional pass per reserved
+   * corner entry, each time treating that corner as the "moving" widget at
+   * its own fixed position -- so real widgets get pushed away from a
+   * reserved cell, never the other way around. Calling
+   * resolveLayoutWithPushDown() directly with reserved corners simply
+   * mixed into the list would do the opposite: since the function always
+   * keeps whichever id is passed as movingId exactly at its target and
+   * pushes everything else, a real widget passed as movingId would shove
+   * the "reserved" corner entries out of the way instead, since they're
+   * just ordinary list entries to that function otherwise. Reserved entries
+   * are always stripped from the returned list before it's used.
+   * @param {string} movingId
+   * @param {object} targetLayout
+   * @param {Array<object>} widgetList - real widgets only, no reserved entries
+   * @param {Array<object>} reserved - from getReservedCornerEntries()
+   * @returns {Array<object>} real widgets only, reserved-corner-safe
+   */
+  resolveWithReservedCorners(movingId, targetLayout, widgetList, reserved) {
+    let list = this.layoutEngine.resolveLayoutWithPushDown(movingId, targetLayout, widgetList);
+    for (const r of reserved) {
+      list = this.layoutEngine.resolveLayoutWithPushDown(r.id, r.layout, [...list, r]);
+    }
+    return list.filter((w) => !reserved.some((res) => res.id === w.id));
+  }
+
+  /**
+   * Same idea as resolveWithReservedCorners() but for building a whole
+   * layout from scratch rather than moving one widget: inserts each item in
+   * `items` one at a time via resolveLayoutWithPushDown() (so later
+   * insertions cascade-push earlier real ones, same insert-one-at-a-time
+   * pattern LayoutEngine.mirrorLayout() already uses internally), then runs
+   * the same reserved-corner-eviction pass. Used by handleMirrorLayout()'s
+   * post-pass and renderActivePage()'s pre-existing-data reflow.
+   * @param {Array<object>} items
+   * @param {Array<object>} reserved - from getReservedCornerEntries()
+   * @returns {Array<object>}
+   */
+  resolveListWithReservedCorners(items, reserved) {
+    let list = [];
+    for (const item of items) {
+      list = this.layoutEngine.resolveLayoutWithPushDown(item.id, item.layout, [...list, item]);
+    }
+    for (const r of reserved) {
+      list = this.layoutEngine.resolveLayoutWithPushDown(r.id, r.layout, [...list, r]);
+    }
+    return list.filter((w) => !reserved.some((res) => res.id === w.id));
+  }
+
+  /**
+   * Builds the .fd-corner-overlay (see grid.css) as the first child of
+   * #content-area and mounts the two corner widgets into it. Called once
+   * per renderActivePage() call, on every branch.
+   */
+  mountCornerWidgets(orientation, deviceTier, gridSpec) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fd-corner-overlay';
+    this.layoutEngine.applyGridToContainer(overlay, gridSpec);
+    this.contentArea.appendChild(overlay);
+
+    const { menu, profile } = this.getCornerWidgetLayouts(orientation, deviceTier, gridSpec);
+
+    const menuInstance = WidgetRegistry.createWidget(menu, this.eventBus);
+    menuInstance.mount(overlay);
+    // The overlay itself is pointer-events:none (see grid.css) so clicks
+    // pass through to real widgets in the reserved-but-otherwise-empty
+    // middle columns; these two are the exception.
+    menuInstance.element.style.pointerEvents = 'auto';
+    this.cornerWidgetInstances.push(menuInstance);
+    this.menuToggleWidget = menuInstance;
+
+    const profileInstance = WidgetRegistry.createWidget(profile, this.eventBus);
+    profileInstance.mount(overlay);
+    profileInstance.element.style.pointerEvents = 'auto';
+    this.cornerWidgetInstances.push(profileInstance);
+    this.appProfileWidget = profileInstance;
+
+    this.updateMenuButtonStatus();
+    this.wireCornerInteractions();
+  }
+
+  /**
+   * (Re)wires the menu button's click handler and the App Profile badge's
+   * long-press handler. Called once per renderActivePage() (from
+   * mountCornerWidgets()), since both corner widgets are destroyed and
+   * recreated every render. The dropdown's own outside-click-to-close
+   * listener is NOT here -- see initHeaderControls()'s one-time setup, to
+   * avoid accumulating a new document-level listener on every render.
+   */
+  wireCornerInteractions() {
+    const badgeEl = this.appProfileWidget?.element;
+    if (badgeEl) {
+      this.attachLongPressOpen(badgeEl, () => {
+        if (this.profileSelector) this.profileSelector.open();
+      });
+    }
+
+    const menuBtn = this.menuToggleWidget?.element;
+    const menuDropdown = document.getElementById('menu-dropdown');
+    if (!menuBtn || !menuDropdown) return;
+
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // While editing, the menu corner widget shows a pencil icon (see
+      // MenuToggleWidget.setAppEditMode()) and toggles the edit toolbar's
+      // visibility instead of opening the nav dropdown -- the toolbar can
+      // otherwise cover the same top rows this widget and the App Profile
+      // badge (and any real widget placed between them) occupy.
+      if (this.isEditMode) {
+        this.toggleEditToolbarVisibility();
+        return;
+      }
+      const editBtn = document.getElementById('menu-edit-mode-btn');
+      if (editBtn) {
+        editBtn.style.display = (this.activePageId === 'page_settings') ? 'none' : 'flex';
+      }
+      menuDropdown.classList.toggle('open');
+    });
   }
 
   /**
@@ -659,9 +859,31 @@ export class FlightDeckApp {
       w.setEditMode(active);
     });
 
+    // Pencil-icon toggle on the menu corner widget; the toolbar always
+    // starts visible on entry/exit -- the pencil is a temporary peek
+    // toggle, not a persisted preference (see toggleEditToolbarVisibility()).
+    this.editToolbarVisible = true;
+    this.menuToggleWidget?.setAppEditMode(active);
+
     if (active) {
       this.saveHistorySnapshot();
       this.editToolbar.setOrientation(this.currentOrientation);
+      this.editToolbar.show();
+    } else {
+      this.editToolbar.hide();
+    }
+  }
+
+  /**
+   * Toggles the edit-mode toolbar's visibility without leaving edit mode --
+   * triggered by tapping the menu corner widget's pencil icon while editing
+   * (see MenuToggleWidget.setAppEditMode()/wireCornerInteractions()). Needed
+   * because the toolbar's own row can otherwise cover the same top rows the
+   * corner widgets (and any real widget placed between them) occupy.
+   */
+  toggleEditToolbarVisibility() {
+    this.editToolbarVisible = !this.editToolbarVisible;
+    if (this.editToolbarVisible) {
       this.editToolbar.show();
     } else {
       this.editToolbar.hide();
@@ -886,17 +1108,21 @@ export class FlightDeckApp {
           if (page) {
             this.saveHistorySnapshot();
 
-            const gridSpec = page.getGrid(this.currentOrientation, this.currentDeviceTier);
+            const gridSpec = page.getGrid(this.currentOrientation, this.currentDeviceTier) || LayoutEngine.getGridSpec(this.currentOrientation, this.currentDeviceTier);
             if (gridSpec && gridSpec.columns) {
               this.layoutEngine.gridCols = gridSpec.columns;
             }
 
-            // Cascading push-down reordering & auto-compact for active tier + orientation
+            // Cascading push-down reordering & auto-compact for active tier +
+            // orientation, plus a reserved-corner eviction pass (menu/App
+            // Profile badge cells) -- see resolveWithReservedCorners().
+            const reserved = this.getReservedCornerEntries(this.currentOrientation, this.currentDeviceTier, gridSpec);
             const currentWidgets = page.getWidgets(this.currentOrientation, this.currentDeviceTier);
-            const updatedWidgets = this.layoutEngine.resolveLayoutWithPushDown(
+            const updatedWidgets = this.resolveWithReservedCorners(
               widgetInstance.id,
               candidate,
-              currentWidgets
+              currentWidgets,
+              reserved
             );
 
             page.setWidgets(this.currentOrientation, this.currentDeviceTier, updatedWidgets);
@@ -945,10 +1171,13 @@ export class FlightDeckApp {
     const defW = Math.max(1, Math.min(thisGrid.columns, Math.round((declaredW / declaredForCols) * thisGrid.columns)));
     const defH = descriptor?.defaultLayout?.h || 2;
 
+    // Reserved corner cells (menu/App Profile badge) count as occupied so a
+    // new widget is never auto-placed on top of them.
+    const reserved = this.getReservedCornerEntries(orientation, tier, thisGrid);
     const layout = this.layoutEngine.findNextFreeSlot(
       defW,
       defH,
-      compacted
+      [...compacted, ...reserved]
     );
 
     const newWidgetConfig = {
@@ -1015,18 +1244,15 @@ export class FlightDeckApp {
     this.saveHistorySnapshot();
 
     const tier = this.currentDeviceTier;
-    const gridSpec = page.getGrid(orientation, tier);
+    const gridSpec = page.getGrid(orientation, tier) || LayoutEngine.getGridSpec(orientation, tier);
     if (gridSpec && gridSpec.columns) {
       this.layoutEngine.gridCols = gridSpec.columns;
     }
 
     if (layout) {
+      const reserved = this.getReservedCornerEntries(orientation, tier, gridSpec);
       const currentWidgets = page.getWidgets(orientation, tier);
-      const updatedWidgets = this.layoutEngine.resolveLayoutWithPushDown(
-        widgetId,
-        layout,
-        currentWidgets
-      );
+      const updatedWidgets = this.resolveWithReservedCorners(widgetId, layout, currentWidgets, reserved);
       page.setWidgets(orientation, tier, updatedWidgets);
 
       this.activeWidgetInstances.forEach((inst) => {
@@ -1064,7 +1290,14 @@ export class FlightDeckApp {
     const sourceGrid = page.getGrid(fromOrientation, tier) || LayoutEngine.getGridSpec(fromOrientation, tier);
     const targetGrid = page.getGrid(toOrientation, tier) || LayoutEngine.getGridSpec(toOrientation, tier);
 
-    const mirrored = this.layoutEngine.mirrorLayout(sourceWidgets, sourceGrid, targetGrid);
+    let mirrored = this.layoutEngine.mirrorLayout(sourceWidgets, sourceGrid, targetGrid);
+
+    // mirrorLayout() has no obstacle-list parameter to reserve the target
+    // orientation's corner cells directly, so push anything that landed on
+    // one out of the way as a post-pass -- see resolveListWithReservedCorners().
+    const targetReserved = this.getReservedCornerEntries(toOrientation, tier, targetGrid);
+    mirrored = this.resolveListWithReservedCorners(mirrored, targetReserved);
+
     page.setWidgets(toOrientation, tier, mirrored);
 
     console.log(`[FlightDeck] Layout mirrored from ${fromOrientation} to ${toOrientation}`);
@@ -1097,7 +1330,12 @@ export class FlightDeckApp {
 
     const orientation = this.currentOrientation;
     const tier = this.currentDeviceTier;
-    const compacted = this.layoutEngine.compactLayout(page.getWidgets(orientation, tier));
+    const gridSpec = page.getGrid(orientation, tier) || LayoutEngine.getGridSpec(orientation, tier);
+    // Reserved corner cells count as obstacles here too, so compaction never
+    // pulls a real widget up into one.
+    const reserved = this.getReservedCornerEntries(orientation, tier, gridSpec);
+    const compacted = this.layoutEngine.compactLayout([...page.getWidgets(orientation, tier), ...reserved])
+      .filter((w) => !reserved.some((r) => r.id === w.id));
     page.setWidgets(orientation, tier, compacted);
 
     this.renderActivePage();
@@ -1207,9 +1445,8 @@ export class FlightDeckApp {
     this.activeProfile = await this.activateProfile(forkProfile.toJSON());
 
     if (this.profileSelector) this.profileSelector.refreshList();
-    const aircraftBadge = document.getElementById('aircraft-model');
-    if (aircraftBadge) {
-      aircraftBadge.textContent = this.activeProfile.name.toUpperCase().slice(0, 7);
+    if (this.appProfileWidget) {
+      this.appProfileWidget.setLabel(this.activeProfile.name.toUpperCase().slice(0, 7));
     }
   }
 

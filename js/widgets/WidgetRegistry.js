@@ -12,6 +12,8 @@ import { CompositeWidget } from './CompositeWidget.js';
 import { VirtualYokeCenterWidget } from './VirtualYokeCenterWidget.js';
 import { VirtualYokeDetachWidget } from './VirtualYokeDetachWidget.js';
 import { VirtualYokeDeflectionWidget } from './VirtualYokeDeflectionWidget.js';
+import { MenuToggleWidget } from './MenuToggleWidget.js';
+import { AppProfileWidget } from './AppProfileWidget.js';
 import { SecurityValidator } from '../core/SecurityValidator.js';
 
 export class WidgetRegistry {
@@ -136,6 +138,41 @@ export class WidgetRegistry {
         defaultLayout: { w: 6, h: 6 },
         defaultConfig: { label: '', invertPitch: false, invertRoll: false },
         classRef: VirtualYokeDeflectionWidget,
+        isCustom: false
+      }
+    ],
+    [
+      'MenuToggleWidget',
+      {
+        type: 'MenuToggleWidget',
+        name: 'Menu Toggle (Corner Widget)',
+        category: 'System',
+        description: 'App-global navigation menu toggle / PC Bridge & Simulator connection status. Pinned to the top-left corner of every page and cannot be removed or moved.',
+        // 'system': ships pre-placed (computed corner position — see
+        // FlightDeckApp.getCornerWidgetLayouts() — not a Profile/Page),
+        // excluded from the Add Widget drawer, and never user-removable —
+        // same flags VirtualYokeCenterWidget uses above. defaultLayout here
+        // is documentation only; the actual per-render layout always comes
+        // from getCornerWidgetLayouts(), authored against this same
+        // 20-col-portrait/44-col-landscape mobile reference.
+        kind: 'system',
+        defaultLayout: { w: 3, h: 2 },
+        defaultConfig: { removable: false },
+        classRef: MenuToggleWidget,
+        isCustom: false
+      }
+    ],
+    [
+      'AppProfileWidget',
+      {
+        type: 'AppProfileWidget',
+        name: 'App Profile Badge (Corner Widget)',
+        category: 'System',
+        description: 'App-global App Profile name badge (long-press to switch profiles). Pinned to the top-right corner of every page and cannot be removed or moved.',
+        kind: 'system',
+        defaultLayout: { w: 5, h: 2 },
+        defaultConfig: { label: 'DEFAULT', removable: false },
+        classRef: AppProfileWidget,
         isCustom: false
       }
     ]

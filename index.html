@@ -25,27 +25,18 @@
 </head>
 <body>
   <div id="app">
-    <!-- Top Header Bar -->
+    <!-- Top Header Bar — collapsed to zero visible height (css/main.css).
+         The menu toggle / connection-status button and the App Profile
+         badge that used to live here are now corner widgets floated over
+         the real page grid's own top-left/top-right cells (see
+         .fd-corner-overlay in css/grid.css and
+         FlightDeckApp.renderActivePage()/mountCornerWidgets() in app.js),
+         so the space between them is real, addable, draggable page-grid
+         space instead of dead flex whitespace in this fixed bar. This empty
+         header element is kept only as EditToolbar's mount anchor
+         (EditToolbar.js inserts itself directly after it) and the
+         #menu-dropdown nav's stable DOM location below. -->
     <header class="top-bar">
-      <!-- Menu Toggle — also doubles as the PC Bridge/Simulator connection
-           status indicator (see app.js's BRIDGE_STATUS/SIM_STATUS handlers):
-           neutral = no connection, cyan = PC Bridge connected, magenta =
-           simulator connected. Moved off dead-center (was .garmin-menu-btn,
-           absolutely centered) since a centered button collides with a
-           phone's camera cutout in portrait, especially now that Fullscreen
-           mode removes the status bar's own vertical clearance above it. -->
-      <button id="menu-toggle-btn" class="garmin-menu-btn" aria-label="Open Navigation Menu" title="Menu — also shows PC Bridge/Simulator connection status">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="4" x2="20" y1="12" y2="12"></line>
-          <line x1="4" x2="20" y1="6" y2="6"></line>
-          <line x1="4" x2="20" y1="18" y2="18"></line>
-        </svg>
-      </button>
-
-      <!-- App Profile Badge -->
-      <div id="aircraft-model" class="aircraft-badge" title="Long-press to switch App Profile">DEFAULT</div>
-
-      <!-- Menu Dropdown -->
       <nav id="menu-dropdown" class="menu-dropdown">
         <button class="menu-item-btn" data-page="radios">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

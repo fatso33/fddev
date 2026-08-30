@@ -117,22 +117,26 @@ body {
   }
 }
 
-/* Top Header Bar */
+/* Top Header Bar — collapsed to zero visible height. The menu toggle and
+   App Profile badge that used to render here are now corner widgets floated
+   over the page grid's own top-left/top-right cells (see .fd-corner-overlay
+   below and FlightDeckApp.renderActivePage()/getCornerWidgetLayouts() in
+   app.js); this element survives only as EditToolbar's mount anchor
+   (container.querySelector('.top-bar')) and #menu-dropdown's stable DOM
+   location, positioned relative to it below. */
 .top-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 16px;
+  display: block;
+  padding: 0;
+  margin: 0;
   position: relative;
-  /* Must outrank .fd-rotate-prompt's z-index (8000, grid.css) -- it's a
-     sibling of the header under #app, so the header's OWN stacking-context
-     rank (not just .menu-dropdown's nominal z-index: 9000 inside it) is
-     what decides whether the open dropdown paints above or below the
-     rotate prompt while it's showing on the Virtual Yoke page. Still below
-     true modal overlays (10000, grid.css). */
-  z-index: 8500;
-  height: 56px;
+  height: 0;
+  overflow: visible;
   flex-shrink: 0;
+  /* Must outrank .fd-rotate-prompt's z-index (8000, grid.css) so the open
+     #menu-dropdown nav paints above it while the rotate prompt is showing
+     (e.g. on the Virtual Yoke page). Still below true modal overlays
+     (10000, grid.css). */
+  z-index: 8500;
 }
 
 .aircraft-badge {
@@ -181,10 +185,16 @@ body {
   border-color: var(--accent-magenta);
 }
 
-/* Dropdown Menu Drawer */
+/* Dropdown Menu Drawer — a static child of the zero-height .top-bar
+   (position:relative), so it's positioned relative to #app's top edge. Its
+   trigger, the menu corner widget, floats above the page grid's row 1-2
+   (see .fd-corner-overlay, grid.css) at a height that varies slightly by
+   tier/orientation's row-height; this fixed offset is a close approximation
+   of that corner widget's bottom edge, same kind of fixed-offset tolerance
+   the dropdown has always used. */
 .menu-dropdown {
   position: absolute;
-  top: 60px;
+  top: 50px;
   left: 50%;
   transform: translateX(-50%) translateY(-10px);
   width: calc(100% - 32px);
