@@ -267,7 +267,20 @@ export class VirtualYokeEngine {
     // wrist twist when held this way) isn't a yoke input and is ignored.
     // Sign is empirically tuned; flip either line's leading minus if a
     // device reports that axis inverted.
-    const pitchDeg = euler.gamma;
+    //
+    // Landscape-primary vs. landscape-secondary hold flips pitch, not roll:
+    // "pitch" is a rotation about the device's own long (body) axis, and
+    // that axis physically reverses direction between the two landscape
+    // holds (the edge that's "up" swaps sides), even though the real-world
+    // nose-up/nose-down motion the pilot is making is identical either way.
+    // "Roll" is a rotation about the screen-normal axis, which points out of
+    // the screen toward the user in *both* holds, so it needs no
+    // correction — this matches the reported bug exactly (pitch inverted in
+    // one landscape orientation, roll fine in both). screen.orientation.lock
+    // ('landscape') permits either hold with no further signal from the
+    // OS, so this has to be corrected here rather than upstream.
+    const pitchSign = VirtualYokeEngine._getScreenOrientationAngle() === 270 ? -1 : 1;
+    const pitchDeg = pitchSign * euler.gamma;
     const rollDeg = euler.alpha;
 
     this.pitchNorm = VirtualYokeEngine._toNorm(pitchDeg, this.pitchSensitivityDeg);
@@ -279,6 +292,27 @@ export class VirtualYokeEngine {
     if (this._rafId === null) {
       this._rafId = requestAnimationFrame(() => this._flush());
     }
+  }
+
+  /**
+   * Current screen rotation, in the Screen Orientation API's own convention
+   * (degrees clockwise from the device's natural/portrait orientation):
+   * 90 = landscape-primary (device rotated counterclockwise from portrait),
+   * 270 = landscape-secondary (rotated clockwise). Falls back to 90 — the
+   * orientation this engine's pitch sign was originally tuned against —
+   * on a browser without the API, so behavior there is unchanged from
+   * before this correction existed.
+   * @returns {number}
+   */
+  static _getScreenOrientationAngle() {
+    if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number') {
+      return screen.orientation.angle;
+    }
+    if (typeof window !== 'undefined' && typeof window.orientation === 'number') {
+      // Legacy iOS Safari API: -90/0/90/180, not clamped to 0-359.
+      return ((window.orientation % 360) + 360) % 360;
+    }
+    return 90;
   }
 
   /**
