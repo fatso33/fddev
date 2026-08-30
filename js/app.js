@@ -219,7 +219,8 @@ export class FlightDeckApp {
       onUndo: () => this.handleUndo(),
       onSave: () => this.handleSaveLayout(),
       onCancel: () => this.handleCancelEdit(),
-      onRevertPage: () => this.handleRevertPageToDefault(this.activePageId)
+      onRevertPage: () => this.handleRevertPageToDefault(this.activePageId),
+      onCompactLayout: () => this.handleCompactLayout()
     });
     this.editToolbar.mount(appEl);
     this.editToolbar.setOrientation(this.currentOrientation);
@@ -552,8 +553,11 @@ export class FlightDeckApp {
     // toolbar action to copy a layout across as a one-time starting point.
     const widgets = page.getWidgets(orientation, deviceTier);
 
-    // Auto-compact page widgets so there are zero phantom row gaps (preserves custom w & h)
-    const compacted = this.layoutEngine.compactLayout(widgets || []);
+    // Normalize (not auto-compact) so old col/row-vs-x/y-only saved data
+    // still resolves correctly, without pulling widgets up over a gap the
+    // user deliberately left. Use the edit toolbar's explicit "Compact"
+    // action to actually close gaps.
+    const compacted = this.layoutEngine.normalizeLayout(widgets || []);
     page.setWidgets(orientation, deviceTier, compacted);
 
     // Instantiate and mount all widgets
@@ -907,8 +911,8 @@ export class FlightDeckApp {
     const tier = this.currentDeviceTier;
     const currentWidgets = page.getWidgets(orientation, tier);
 
-    // 1. First compact existing widgets to eliminate any gaps
-    const compacted = this.layoutEngine.compactLayout(currentWidgets);
+    // 1. Normalize existing widgets' layout data (no gap-closing — see renderActivePage)
+    const compacted = this.layoutEngine.normalizeLayout(currentWidgets);
     page.setWidgets(orientation, tier, compacted);
 
     const thisGrid = page.getGrid(orientation, tier) || LayoutEngine.getGridSpec(orientation, tier);
@@ -964,8 +968,8 @@ export class FlightDeckApp {
     // Remove strictly from the layout tier + orientation where edit was initiated
     page.removeWidget(widgetId, orientation, tier);
 
-    // Auto-compact current tier + orientation
-    const updated = this.layoutEngine.compactLayout(page.getWidgets(orientation, tier));
+    // Normalize current tier + orientation (no gap-closing — see renderActivePage)
+    const updated = this.layoutEngine.normalizeLayout(page.getWidgets(orientation, tier));
     page.setWidgets(orientation, tier, updated);
 
     const instanceIdx = this.activeWidgetInstances.findIndex((w) => w.id === widgetId);
@@ -1056,6 +1060,26 @@ export class FlightDeckApp {
     if (this.historyStack.length === 0) return;
     const previous = this.historyStack.pop();
     this.activeProfile = await this.activateProfile(JSON.parse(previous));
+    this.renderActivePage();
+  }
+
+  /**
+   * "Compact" edit-toolbar action — the only path that still pulls widgets
+   * up to close gaps (see LayoutEngine.compactLayout()'s doc comment).
+   * Everywhere else (render/add/remove/move) leaves a deliberately-left gap
+   * alone; this is the explicit, user-requested way to actually close them.
+   */
+  handleCompactLayout() {
+    const page = this.activeProfile.getPage(this.activePageId);
+    if (!page) return;
+
+    this.saveHistorySnapshot();
+
+    const orientation = this.currentOrientation;
+    const tier = this.currentDeviceTier;
+    const compacted = this.layoutEngine.compactLayout(page.getWidgets(orientation, tier));
+    page.setWidgets(orientation, tier, compacted);
+
     this.renderActivePage();
   }
 

@@ -267,11 +267,18 @@ export class LayoutEngine {
   }
 
   /**
-   * Compacts layout vertically so there are no empty phantom rows between widgets
+   * Normalizes a widget list's layout objects (fills in whichever of
+   * col/row/x/y is missing from the other, defaults missing w/h) and sorts
+   * top-to-bottom/left-to-right, WITHOUT moving anything vertically. This is
+   * the part of the old always-on `compactLayout()` that's still needed on
+   * every render/edit (old saved data may only have x/y or only col/row) —
+   * split out so a widget's row can be normalized without also being pulled
+   * up over an intentional gap the user left above it. See `compactLayout()`
+   * for the opt-in version that actually closes gaps.
    * @param {Array<object>} widgetList
    * @returns {Array<object>}
    */
-  compactLayout(widgetList = []) {
+  normalizeLayout(widgetList = []) {
     const list = widgetList.map((w) => ({
       ...w,
       layout: {
@@ -284,11 +291,23 @@ export class LayoutEngine {
       }
     }));
 
-    // Sort widgets from top to bottom, then left to right
-    const sorted = list.sort((a, b) => {
+    return list.sort((a, b) => {
       if (a.layout.row !== b.layout.row) return a.layout.row - b.layout.row;
       return a.layout.col - b.layout.col;
     });
+  }
+
+  /**
+   * Compacts layout vertically so there are no empty phantom rows between
+   * widgets. Only ever run on explicit user request (the edit toolbar's
+   * "Compact" action) — normal render/add/remove/move paths use
+   * `normalizeLayout()` instead, so a deliberately-left gap above a widget
+   * survives every edit except this one.
+   * @param {Array<object>} widgetList
+   * @returns {Array<object>}
+   */
+  compactLayout(widgetList = []) {
+    const sorted = this.normalizeLayout(widgetList);
 
     for (const item of sorted) {
       while (item.layout.row > 1) {
@@ -335,7 +354,7 @@ export class LayoutEngine {
     }));
 
     const moving = list.find((w) => w.id === movingWidgetId);
-    if (!moving) return this.compactLayout(list);
+    if (!moving) return this.normalizeLayout(list);
 
     // Keep exact moving widget dimensions, only clamp col and row within the grid boundary
     const movingW = targetLayout.w !== undefined ? targetLayout.w : moving.layout.w;
@@ -398,45 +417,9 @@ export class LayoutEngine {
       }
     }
 
-    // Finally compact any loose items that can move higher up without disturbing the moving widget
-    return this.compactLayoutPreservingTarget(list, movingWidgetId);
-  }
-
-  /**
-   * Compacts layout vertically while locking the explicitly moved widget in place
-   * @param {Array<object>} list
-   * @param {string} lockedWidgetId
-   * @returns {Array<object>}
-   */
-  compactLayoutPreservingTarget(list, lockedWidgetId) {
-    const sorted = [...list].sort((a, b) => {
-      if (a.layout.row !== b.layout.row) return a.layout.row - b.layout.row;
-      return a.layout.col - b.layout.col;
-    });
-
-    for (const item of sorted) {
-      if (item.id === lockedWidgetId) continue;
-
-      while (item.layout.row > 1) {
-        const candidate = { ...item.layout, row: item.layout.row - 1, y: item.layout.row - 2 };
-        let collides = false;
-        for (const other of sorted) {
-          if (other.id === item.id) continue;
-          if (LayoutEngine.boxesIntersect(candidate, other.layout)) {
-            collides = true;
-            break;
-          }
-        }
-        if (!collides) {
-          item.layout.row = candidate.row;
-          item.layout.y = candidate.y;
-        } else {
-          break;
-        }
-      }
-    }
-
-    return sorted;
+    // Positions are final after push-down resolution — just normalize/sort,
+    // don't pull any other widget up into a gap it wasn't dragged into.
+    return this.normalizeLayout(list);
   }
 
   /**
@@ -450,14 +433,16 @@ export class LayoutEngine {
     const width = Math.min(Math.max(1, w), this.gridCols);
     const height = Math.max(1, h);
 
-    // Compact list first to remove any gap
-    const compacted = this.compactLayout(widgetList);
+    // Normalize (not compact) so an existing gap the user left above a
+    // widget still reads as free space a new widget can drop into, instead
+    // of everything getting pulled up first.
+    const normalized = this.normalizeLayout(widgetList);
 
     let row = 1;
     while (row < 200) {
       for (let col = 1; col <= this.gridCols - width + 1; col++) {
         const candidate = { col, row, x: col - 1, y: row - 1, w: width, h: height };
-        if (!this.hasCollision(candidate, null, compacted)) {
+        if (!this.hasCollision(candidate, null, normalized)) {
           return candidate;
         }
       }
