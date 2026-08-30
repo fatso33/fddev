@@ -11,6 +11,7 @@ import { SimBridge } from './core/SimBridge.js';
 import { LayoutEngine } from './core/LayoutEngine.js';
 import { VirtualYokeEngine } from './core/VirtualYokeEngine.js';
 import { WakeLockManager } from './core/WakeLockManager.js';
+import { FullscreenManager } from './core/FullscreenManager.js';
 import { PwaInstallManager } from './core/PwaInstallManager.js';
 import { WidgetRegistry } from './widgets/WidgetRegistry.js';
 import { BaseWidget } from './widgets/BaseWidget.js';
@@ -207,6 +208,9 @@ export class FlightDeckApp {
     this.wakeLock = new WakeLockManager();
     this.wakeLock.bindToggle(document.getElementById('wakelock-toggle-checkbox'));
     this.wakeLock.acquire();
+
+    this.fullscreen = new FullscreenManager();
+    this.fullscreen.bindToggle(document.getElementById('fullscreen-toggle-checkbox'));
   }
 
   initUIComponents() {
