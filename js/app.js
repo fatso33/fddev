@@ -18,6 +18,7 @@ import { BaseWidget } from './widgets/BaseWidget.js';
 import { EditToolbar } from './ui/EditToolbar.js';
 import { WidgetDrawer } from './ui/WidgetDrawer.js';
 import { PropertyInspector } from './ui/PropertyInspector.js';
+import { ButtonConfigPopover } from './ui/ButtonConfigPopover.js';
 import { ProfileSelector } from './ui/ProfileSelector.js';
 import { SettingsView } from './ui/SettingsView.js';
 import { RotatePrompt } from './ui/RotatePrompt.js';
@@ -260,9 +261,18 @@ export class FlightDeckApp {
       eventBus: this.eventBus,
       storageManager: this.storage,
       onSaveConfig: (widgetId, partial) => this.handleUpdateWidgetConfig(widgetId, partial, this.currentOrientation),
-      onRemoveWidget: (widgetId) => this.removeWidgetFromPage(widgetId, this.currentOrientation)
+      onRemoveWidget: (widgetId) => this.removeWidgetFromPage(widgetId, this.currentOrientation),
+      onConfigureButton: (widgetId) => this.openButtonConfigPopover(widgetId, 'edit')
     });
     this.propertyInspector.mount(appEl);
+
+    // 3b. Button Config Popover (built-in configurable button widget)
+    this.buttonConfigPopover = new ButtonConfigPopover({
+      storageManager: this.storage,
+      onSaveConfig: (widgetId, partial) => this.handleUpdateWidgetConfig(widgetId, partial, this.currentOrientation),
+      onCancelAdd: () => this.handleUndo()
+    });
+    this.buttonConfigPopover.mount(appEl);
 
     // 4. Profile Selector
     this.profileSelector = new ProfileSelector({
@@ -623,6 +633,7 @@ export class FlightDeckApp {
     // Instantiate and mount all widgets
     finalWidgets.forEach((wConfig) => {
       const widgetInstance = WidgetRegistry.createWidget(wConfig, this.eventBus);
+      if (!widgetInstance) return;
       widgetInstance.mount(this.gridContainer);
       widgetInstance.setEditMode(this.isEditMode);
       this.attachDragHandlers(widgetInstance);
@@ -1398,6 +1409,31 @@ export class FlightDeckApp {
 
     // 2. Re-render active page to cleanly update and synchronize all layout positions
     this.renderActivePage();
+
+    // "Quick add" widget types (currently just the configurable button) open
+    // their own config popover immediately after being placed -- Cancel
+    // there undoes this whole add via handleUndo(), reusing the snapshot
+    // saveHistorySnapshot() already took above.
+    if (descriptor?.openConfigOnAdd) {
+      const newInstance = this.activeWidgetInstances.find((w) => w.id === newWidgetConfig.id);
+      if (newInstance) {
+        this.openButtonConfigPopover(newInstance, 'add');
+      }
+    }
+  }
+
+  /**
+   * @param {string|object} widgetOrId - a widget id (resolved against
+   *   activeWidgetInstances) or an already-resolved live widget instance.
+   * @param {'add'|'edit'} mode
+   */
+  openButtonConfigPopover(widgetOrId, mode) {
+    const widget = typeof widgetOrId === 'string'
+      ? this.activeWidgetInstances.find((w) => w.id === widgetOrId)
+      : widgetOrId;
+    if (widget) {
+      this.buttonConfigPopover.open(widget, { mode });
+    }
   }
 
   removeWidgetFromPage(widgetId, orientation = this.currentOrientation) {

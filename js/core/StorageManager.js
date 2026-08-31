@@ -5,6 +5,7 @@
 
 import { SecurityValidator } from './SecurityValidator.js';
 import { SAMPLE_FDWS_WIDGETS } from '../widgets/definitions/sampleWidgets.js';
+import { buildDefaultButtonDefinition } from '../widgets/buildDefaultButtonDefinition.js';
 
 const DB_NAME = 'flightdeck_db_v2';
 const DB_VERSION = 2;
@@ -131,10 +132,7 @@ export class StorageManager {
                     layout: { col: 1, row: 1, x: 0, y: 0, w: 12, h: 8 },
                     config: {
                       label: 'AP MASTER',
-                      shortLabel: 'AP',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'apMasterState', writeEvent: 'apMaster' }
+                      definition: buildDefaultButtonDefinition({ label: 'AP MASTER', variant: 'toggle', hasLed: true, presetId: 'cockpit-glass', readSimVar: 'apMasterState', writeEvent: 'apMaster' })
                     }
                   },
                   {
@@ -143,10 +141,7 @@ export class StorageManager {
                     layout: { col: 13, row: 1, x: 12, y: 0, w: 8, h: 8 },
                     config: {
                       label: 'FLIGHT DIRECTOR',
-                      shortLabel: 'FD',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'apFdState', writeEvent: 'apFdToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'FLIGHT DIRECTOR', variant: 'toggle', hasLed: true, presetId: 'cockpit-glass', readSimVar: 'apFdState', writeEvent: 'apFdToggle' })
                     }
                   },
                   {
@@ -170,9 +165,7 @@ export class StorageManager {
                     layout: { col: 13, row: 9, x: 12, y: 8, w: 8, h: 8 },
                     config: {
                       label: 'HDG HOLD',
-                      shortLabel: 'HDG MODE',
-                      variant: 'toggle',
-                      binding: { readSimVar: 'apHdgModeState', writeEvent: 'apHdgHoldToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'HDG HOLD', variant: 'toggle', hasLed: false, presetId: 'cockpit-glass', readSimVar: 'apHdgModeState', writeEvent: 'apHdgHoldToggle' })
                     }
                   }
                 ]
@@ -186,10 +179,7 @@ export class StorageManager {
                     layout: { col: 1, row: 1, x: 0, y: 0, w: 10, h: 8 },
                     config: {
                       label: 'AP MASTER',
-                      shortLabel: 'AP',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'apMasterState', writeEvent: 'apMaster' }
+                      definition: buildDefaultButtonDefinition({ label: 'AP MASTER', variant: 'toggle', hasLed: true, presetId: 'cockpit-glass', readSimVar: 'apMasterState', writeEvent: 'apMaster' })
                     }
                   },
                   {
@@ -198,10 +188,7 @@ export class StorageManager {
                     layout: { col: 11, row: 1, x: 10, y: 0, w: 10, h: 8 },
                     config: {
                       label: 'FLIGHT DIRECTOR',
-                      shortLabel: 'FD',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'apFdState', writeEvent: 'apFdToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'FLIGHT DIRECTOR', variant: 'toggle', hasLed: true, presetId: 'cockpit-glass', readSimVar: 'apFdState', writeEvent: 'apFdToggle' })
                     }
                   },
                   {
@@ -225,9 +212,7 @@ export class StorageManager {
                     layout: { col: 33, row: 1, x: 32, y: 0, w: 10, h: 8 },
                     config: {
                       label: 'HDG HOLD',
-                      shortLabel: 'HDG MODE',
-                      variant: 'toggle',
-                      binding: { readSimVar: 'apHdgModeState', writeEvent: 'apHdgHoldToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'HDG HOLD', variant: 'toggle', hasLed: false, presetId: 'cockpit-glass', readSimVar: 'apHdgModeState', writeEvent: 'apHdgHoldToggle' })
                     }
                   }
                 ]
@@ -248,10 +233,7 @@ export class StorageManager {
                     layout: { col: 1, row: 1, x: 0, y: 0, w: 20, h: 8 },
                     config: {
                       label: 'LANDING',
-                      shortLabel: 'LANDING',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'landingLightState', writeEvent: 'landingLightsToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'LANDING', variant: 'toggle', hasLed: true, presetId: 'caution-amber', readSimVar: 'landingLightState', writeEvent: 'landingLightsToggle' })
                     }
                   },
                   {
@@ -260,10 +242,7 @@ export class StorageManager {
                     layout: { col: 1, row: 9, x: 0, y: 8, w: 20, h: 8 },
                     config: {
                       label: 'TAXI',
-                      shortLabel: 'TAXI',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'taxiLightState', writeEvent: 'taxiLightsToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'TAXI', variant: 'toggle', hasLed: true, presetId: 'caution-amber', readSimVar: 'taxiLightState', writeEvent: 'taxiLightsToggle' })
                     }
                   },
                   {
@@ -272,10 +251,7 @@ export class StorageManager {
                     layout: { col: 1, row: 17, x: 0, y: 16, w: 20, h: 8 },
                     config: {
                       label: 'NAV',
-                      shortLabel: 'NAV',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'navLightState', writeEvent: 'navLightsToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'NAV', variant: 'toggle', hasLed: true, presetId: 'caution-amber', readSimVar: 'navLightState', writeEvent: 'navLightsToggle' })
                     }
                   },
                   {
@@ -284,10 +260,7 @@ export class StorageManager {
                     layout: { col: 1, row: 25, x: 0, y: 24, w: 20, h: 8 },
                     config: {
                       label: 'STROBE',
-                      shortLabel: 'STROBE',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'strobeLightState', writeEvent: 'strobeLightsToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'STROBE', variant: 'toggle', hasLed: true, presetId: 'warning-red', readSimVar: 'strobeLightState', writeEvent: 'strobeLightsToggle' })
                     }
                   }
                 ]
@@ -301,10 +274,7 @@ export class StorageManager {
                     layout: { col: 1, row: 1, x: 0, y: 0, w: 20, h: 8 },
                     config: {
                       label: 'LANDING',
-                      shortLabel: 'LANDING',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'landingLightState', writeEvent: 'landingLightsToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'LANDING', variant: 'toggle', hasLed: true, presetId: 'caution-amber', readSimVar: 'landingLightState', writeEvent: 'landingLightsToggle' })
                     }
                   },
                   {
@@ -313,10 +283,7 @@ export class StorageManager {
                     layout: { col: 23, row: 1, x: 22, y: 0, w: 20, h: 8 },
                     config: {
                       label: 'TAXI',
-                      shortLabel: 'TAXI',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'taxiLightState', writeEvent: 'taxiLightsToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'TAXI', variant: 'toggle', hasLed: true, presetId: 'caution-amber', readSimVar: 'taxiLightState', writeEvent: 'taxiLightsToggle' })
                     }
                   },
                   {
@@ -325,10 +292,7 @@ export class StorageManager {
                     layout: { col: 1, row: 9, x: 0, y: 8, w: 20, h: 8 },
                     config: {
                       label: 'NAV',
-                      shortLabel: 'NAV',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'navLightState', writeEvent: 'navLightsToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'NAV', variant: 'toggle', hasLed: true, presetId: 'caution-amber', readSimVar: 'navLightState', writeEvent: 'navLightsToggle' })
                     }
                   },
                   {
@@ -337,10 +301,7 @@ export class StorageManager {
                     layout: { col: 23, row: 9, x: 22, y: 8, w: 20, h: 8 },
                     config: {
                       label: 'STROBE',
-                      shortLabel: 'STROBE',
-                      variant: 'toggle',
-                      hasLed: true,
-                      binding: { readSimVar: 'strobeLightState', writeEvent: 'strobeLightsToggle' }
+                      definition: buildDefaultButtonDefinition({ label: 'STROBE', variant: 'toggle', hasLed: true, presetId: 'warning-red', readSimVar: 'strobeLightState', writeEvent: 'strobeLightsToggle' })
                     }
                   }
                 ]

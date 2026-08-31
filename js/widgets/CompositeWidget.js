@@ -112,6 +112,22 @@ export class CompositeWidget extends BaseWidget {
   }
 
   /**
+   * BaseWidget.updateConfig() merges the partial config into this.config and
+   * re-renders, but this.definition (what render() actually reads) is only
+   * ever resolved once, in the constructor -- so a config-only update that
+   * swaps in a new config.definition (e.g. ButtonConfigPopover.js editing a
+   * per-instance embedded definition) would silently keep rendering the OLD
+   * definition. Re-resolve before delegating to the base implementation.
+   * @param {object} newConfig
+   */
+  updateConfig(newConfig) {
+    this.config = { ...this.config, ...newConfig };
+    this.definition = this.resolveDefinition({ type: this.type, config: this.config });
+    this.initLocalState();
+    super.updateConfig(newConfig);
+  }
+
+  /**
    * Resolves asset identifier to data URL or cached object URL
    * @param {string} assetId
    * @returns {string|null}

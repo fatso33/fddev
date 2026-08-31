@@ -4,7 +4,6 @@
  * Supports native built-in avionics classes and declarative FDWS v1.1 composite definitions.
  */
 
-import { ButtonWidget } from './ButtonWidget.js';
 import { DisplayWidget } from './DisplayWidget.js';
 import { RotaryWidget } from './RotaryWidget.js';
 import { AnnunciatorWidget } from './AnnunciatorWidget.js';
@@ -15,6 +14,7 @@ import { VirtualYokeDeflectionWidget } from './VirtualYokeDeflectionWidget.js';
 import { MenuToggleWidget } from './MenuToggleWidget.js';
 import { AppProfileWidget } from './AppProfileWidget.js';
 import { SecurityValidator } from '../core/SecurityValidator.js';
+import { buildDefaultButtonDefinition } from './buildDefaultButtonDefinition.js';
 
 export class WidgetRegistry {
   static catalog = new Map([
@@ -24,17 +24,17 @@ export class WidgetRegistry {
         type: 'ButtonWidget',
         name: 'Switch / Push Button',
         category: 'Controls',
-        description: 'Momentary or toggle switch with LED status and tactile active glow',
-        defaultLayout: { w: 10, h: 4 },
+        description: 'Configurable momentary or toggle button -- pick a style, an optional active LED, and a Deck Event to read/write',
+        defaultLayout: { w: 3, h: 3, minW: 2, minH: 2 },
         defaultConfig: {
           label: 'BUTTON',
-          shortLabel: 'BTN',
-          variant: 'toggle',
-          hasLed: true,
-          color: 'cyan',
-          binding: { readSimVar: '', writeEvent: '' }
+          definition: buildDefaultButtonDefinition()
         },
-        classRef: ButtonWidget,
+        // Not part of defaultConfig (which gets deep-cloned into every
+        // instance's own config) -- a descriptor-level hint app.js checks
+        // right after placing a new widget of this type.
+        openConfigOnAdd: true,
+        classRef: CompositeWidget,
         isCustom: false
       }
     ],
@@ -193,8 +193,8 @@ export class WidgetRegistry {
       if (this.definitions.has(instanceConfig.type)) {
         return new CompositeWidget(instanceConfig, eventBus);
       }
-      console.warn(`[WidgetRegistry] Unknown widget type: ${instanceConfig.type}, falling back to ButtonWidget`);
-      return new ButtonWidget(instanceConfig, eventBus);
+      console.error(`[WidgetRegistry] Unknown widget type: ${instanceConfig.type} -- refusing to mount`);
+      return null;
     }
     return new descriptor.classRef(instanceConfig, eventBus);
   }

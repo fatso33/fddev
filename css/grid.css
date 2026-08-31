@@ -713,6 +713,36 @@
   color: var(--text-white);
 }
 
+/* ButtonConfigPopover.js style-preset swatch row */
+.fd-btncfg-swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fd-btncfg-swatch {
+  flex: 1 1 auto;
+  min-width: 84px;
+  border: 1px solid;
+  border-radius: 6px;
+  padding: 8px 6px;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  opacity: 0.75;
+}
+
+.fd-btncfg-swatch:hover {
+  opacity: 1;
+}
+
+.fd-btncfg-swatch.selected {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--accent-cyan);
+}
+
 /* Respond to Sim Events Toggle Box */
 .fd-insp-toggle-box {
   display: flex;

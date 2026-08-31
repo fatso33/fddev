@@ -7,16 +7,20 @@
 import { SecurityValidator } from '../core/SecurityValidator.js';
 import { WidgetRegistry } from '../widgets/WidgetRegistry.js';
 import { LayoutEngine } from '../core/LayoutEngine.js';
-import { getDeckEventsByKind, DECK_EVENT_NAMES } from '../core/deckEvents.js';
-import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
-import { getPackSuggestedEvents } from '../core/deckEventPacks.js';
-
-const CUSTOM_OPTION_VALUE = '__custom__';
+import {
+  CUSTOM_OPTION_VALUE,
+  populateDefaultSelect,
+  wireBindingControls,
+  refreshCustomDeckEvents,
+  setBindingControlValue,
+  getBindingControlValue
+} from './DeckEventBindingField.js';
 
 export class PropertyInspector {
-  constructor({ onSaveConfig, onRemoveWidget, eventBus, storageManager }) {
+  constructor({ onSaveConfig, onRemoveWidget, onConfigureButton, eventBus, storageManager }) {
     this.onSaveConfig = onSaveConfig;
     this.onRemoveWidget = onRemoveWidget;
+    this.onConfigureButton = onConfigureButton;
     this.eventBus = eventBus;
     this.storageManager = storageManager;
     this.element = null;
@@ -52,13 +56,15 @@ export class PropertyInspector {
         </div>
 
         <div class="fd-inspector-body">
-          <!-- Widget Label Field -->
-          <div class="fd-insp-field">
-            <label for="insp-input-label">Widget Display Label</label>
-            <input type="text" id="insp-input-label" placeholder="e.g. NAV, HDG, AP MASTER" maxlength="32" />
+          <!-- Configurable Button widgets: type/style/LED/label/binding are
+               all edited in their own dedicated popover instead of the
+               generic fields below -- see ButtonConfigPopover.js. -->
+          <div class="fd-insp-field hidden" id="fd-insp-configure-button-row">
+            <button type="button" id="insp-configure-button-btn" class="btn-secondary" style="width:100%;">Configure Button…</button>
           </div>
 
-          <!-- Grid Dimensions (Width & Height) -->
+          <!-- Grid Dimensions (Width & Height) -- always applies, even to
+               widgets whose content fields live in the popover above. -->
           <div class="fd-insp-grid-dims-container">
             <div class="fd-insp-grid-dims-header">
               <label class="fd-insp-section-label">Grid Dimensions (Columns × Rows)</label>
@@ -88,6 +94,14 @@ export class PropertyInspector {
                 </div>
               </div>
             </div>
+          </div>
+
+          <div id="fd-insp-generic-config-group">
+
+          <!-- Widget Label Field -->
+          <div class="fd-insp-field">
+            <label for="insp-input-label">Widget Display Label</label>
+            <input type="text" id="insp-input-label" placeholder="e.g. NAV, HDG, AP MASTER" maxlength="32" />
           </div>
 
           <!-- Respond to Simulator Events Toggle -->
@@ -124,6 +138,8 @@ export class PropertyInspector {
             <label for="insp-input-custom-simvar">Or type a new custom variable / raw SimVar (L:/A:...)</label>
             <input type="text" id="insp-input-custom-simvar" placeholder="e.g. myCustomVar, L:FBW_TAXI_LIGHT_INTENSITY" />
           </div>
+
+          </div>
         </div>
 
         <div class="fd-inspector-actions">
@@ -153,6 +169,14 @@ export class PropertyInspector {
     cancelBtn.addEventListener('click', () => this.close());
     saveBtn.addEventListener('click', () => this.handleSave());
     removeBtn.addEventListener('click', () => this.handleRemove());
+    const configureBtn = this.element.querySelector('#insp-configure-button-btn');
+    configureBtn.addEventListener('click', () => {
+      if (this.activeWidget && this.onConfigureButton) {
+        const widgetId = this.activeWidget.id;
+        this.close();
+        this.onConfigureButton(widgetId);
+      }
+    });
 
     this.element.addEventListener('click', (e) => {
       if (e.target === this.element) this.close();
@@ -176,168 +200,10 @@ export class PropertyInspector {
       this.tempRespondToSim = toggleSimCheckbox.checked;
     });
 
-    this.populateDefaultSelects();
-    this.wireBindingControls('event');
-    this.wireBindingControls('simvar');
-  }
-
-  /**
-   * Fills the two default-Deck-Event <select> elements from
-   * shared/deckEvents.js (getDeckEventsByKind) plus a trailing "Custom..."
-   * option. Static for the app's lifetime — default Deck Events don't
-   * change at runtime, so this only needs to run once, unlike the custom
-   * dropdowns (see refreshCustomDeckEvents()).
-   */
-  populateDefaultSelects() {
-    const fill = (selectEl, kind) => {
-      selectEl.innerHTML = '';
-      for (const deckEvent of getDeckEventsByKind(kind)) {
-        const opt = document.createElement('option');
-        opt.value = deckEvent.name;
-        opt.textContent = deckEvent.label;
-        selectEl.appendChild(opt);
-      }
-      const customOpt = document.createElement('option');
-      customOpt.value = CUSTOM_OPTION_VALUE;
-      customOpt.textContent = 'Custom…';
-      selectEl.appendChild(customOpt);
-    };
-    fill(this.element.querySelector('#insp-select-event'), 'write');
-    fill(this.element.querySelector('#insp-select-simvar'), 'read');
-  }
-
-  /**
-   * Wires the show/hide + value-forwarding behavior shared by the write
-   * (event) and read (simvar) binding controls.
-   * @param {'event'|'simvar'} kind
-   */
-  wireBindingControls(kind) {
-    const defaultSelect = this.element.querySelector(`#insp-select-${kind}`);
-    const customBlock = this.element.querySelector(`#insp-custom-${kind}-block`);
-    const customSelect = this.element.querySelector(`#insp-select-custom-${kind}`);
-    const customInput = this.element.querySelector(`#insp-input-custom-${kind}`);
-
-    defaultSelect.addEventListener('change', () => {
-      const isCustom = defaultSelect.value === CUSTOM_OPTION_VALUE;
-      customBlock.classList.toggle('hidden', !isCustom);
-    });
-
-    // Picking a known custom Deck Event copies it into the free-text field,
-    // which stays the single source of truth handleSave() reads from —
-    // avoids ambiguity between "what's selected" and "what's typed."
-    customSelect.addEventListener('change', () => {
-      if (customSelect.value) customInput.value = customSelect.value;
-    });
-  }
-
-  /**
-   * Rescans every currently-installed widget (via storageManager — the same
-   * local store PC Bridge sync writes into, so this reflects whatever
-   * custom widgets are currently synced) for non-default Deck Events, merges
-   * in any Community Deck Events Packs imported via SettingsView.js (see
-   * core/deckEventPacks.js), and repopulates the two custom-mode dropdowns.
-   * Called each time the inspector opens, since a widget can be installed
-   * (or a pack imported) while the app is running.
-   */
-  async refreshCustomDeckEvents() {
-    this.customReadEvents = [];
-    this.customWriteEvents = [];
-
-    let widgetDefs = [];
-    if (this.storageManager && typeof this.storageManager.getAllWidgetDefinitions === 'function') {
-      try {
-        widgetDefs = await this.storageManager.getAllWidgetDefinitions();
-      } catch (err) {
-        console.warn('[PropertyInspector] Could not scan widgets for custom Deck Events:', err);
-      }
-    }
-
-    const fromWidgets = extractCustomDeckEvents(widgetDefs, DECK_EVENT_NAMES).map((e) => ({
-      ...e,
-      source: e.widgetIds.length ? `used by ${e.widgetIds.join(', ')}` : ''
-    }));
-    const fromPacks = getPackSuggestedEvents()
-      .filter((e) => !fromWidgets.some((w) => w.name === e.name))
-      .map((e) => ({ name: e.name, kind: e.kind, source: `from pack: ${e.fromPack}` }));
-    const merged = [...fromWidgets, ...fromPacks];
-
-    this.customReadEvents = merged.filter((e) => e.kind === 'read');
-    this.customWriteEvents = merged.filter((e) => e.kind === 'write');
-
-    this.fillCustomSelect('event', this.customWriteEvents);
-    this.fillCustomSelect('simvar', this.customReadEvents);
-  }
-
-  fillCustomSelect(kind, entries) {
-    const selectEl = this.element.querySelector(`#insp-select-custom-${kind}`);
-    if (!selectEl) return;
-    selectEl.innerHTML = '';
-
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = entries.length > 0 ? '— select or type below —' : '(no custom Deck Events in use yet — try importing a Community Pack in Settings)';
-    selectEl.appendChild(placeholder);
-
-    for (const entry of entries) {
-      const opt = document.createElement('option');
-      opt.value = entry.name;
-      opt.textContent = entry.source ? `${entry.name} (${entry.source})` : entry.name;
-      selectEl.appendChild(opt);
-    }
-  }
-
-  /**
-   * Sets up one binding control pair (default select + custom block) for
-   * the widget currently being inspected: selects the matching default
-   * option if `value` is a known default Deck Event, otherwise switches to
-   * custom mode — selecting the matching custom-dropdown entry if `value`
-   * is already in use by another widget, or just dropping it into the
-   * free-text field if it's genuinely new (or a raw SimVar/H:/L:/K: escape
-   * hatch).
-   * @param {'event'|'simvar'} kind
-   * @param {string} value - current binding value, may be ''
-   */
-  setBindingControlValue(kind, value) {
-    const defaultSelect = this.element.querySelector(`#insp-select-${kind}`);
-    const customBlock = this.element.querySelector(`#insp-custom-${kind}-block`);
-    const customSelect = this.element.querySelector(`#insp-select-custom-${kind}`);
-    const customInput = this.element.querySelector(`#insp-input-custom-${kind}`);
-
-    const isKnownDefault = value && [...defaultSelect.options].some((o) => o.value === value && o.value !== CUSTOM_OPTION_VALUE);
-
-    if (isKnownDefault) {
-      defaultSelect.value = value;
-      customBlock.classList.add('hidden');
-      customSelect.value = '';
-      customInput.value = '';
-      return;
-    }
-
-    defaultSelect.value = CUSTOM_OPTION_VALUE;
-    customBlock.classList.remove('hidden');
-
-    const isKnownCustom = value && [...customSelect.options].some((o) => o.value === value);
-    if (isKnownCustom) {
-      customSelect.value = value;
-      customInput.value = value;
-    } else {
-      customSelect.value = '';
-      customInput.value = value || '';
-    }
-  }
-
-  /**
-   * Reads back the effective binding value for one control pair — whatever
-   * ended up in the custom free-text field if the default select is on
-   * "Custom…", otherwise the default select's own value.
-   * @param {'event'|'simvar'} kind
-   * @returns {string}
-   */
-  getBindingControlValue(kind) {
-    const defaultSelect = this.element.querySelector(`#insp-select-${kind}`);
-    if (defaultSelect.value !== CUSTOM_OPTION_VALUE) return defaultSelect.value;
-    const customInput = this.element.querySelector(`#insp-input-custom-${kind}`);
-    return customInput.value.trim();
+    populateDefaultSelect(this.element, 'insp', 'event', 'write');
+    populateDefaultSelect(this.element, 'insp', 'simvar', 'read');
+    wireBindingControls(this.element, 'insp', 'event');
+    wireBindingControls(this.element, 'insp', 'simvar');
   }
 
   async inspect(widget, orientation = 'portrait', tier = 'mobile') {
@@ -383,11 +249,25 @@ export class PropertyInspector {
     // Rescan before wiring up the binding controls, so a custom Deck Event
     // already in use by another widget correctly pre-selects in the custom
     // dropdown instead of only landing in the free-text field.
-    await this.refreshCustomDeckEvents();
+    await refreshCustomDeckEvents(this.element, 'insp', this.storageManager);
     const currentEvent = widget.config.writeEvent || widget.config.binding?.writeEvent || '';
     const currentSimVar = widget.config.binding?.readSimVar || widget.config.activeSimVar || '';
-    this.setBindingControlValue('event', currentEvent);
-    this.setBindingControlValue('simvar', currentSimVar);
+    setBindingControlValue(this.element, 'insp', 'event', currentEvent);
+    setBindingControlValue(this.element, 'insp', 'simvar', currentSimVar);
+
+    // The composite button widget's type/style/label/binding are edited via
+    // its own dedicated popover, not this generic form -- surface a link to
+    // it instead of duplicating those fields here. Layout/resize below still
+    // applies to this widget type unchanged.
+    const isConfigurableButton = widget.type === 'ButtonWidget';
+    const configureBtnRow = this.element.querySelector('#fd-insp-configure-button-row');
+    if (configureBtnRow) {
+      configureBtnRow.classList.toggle('hidden', !isConfigurableButton);
+    }
+    const genericGroup = this.element.querySelector('#fd-insp-generic-config-group');
+    if (genericGroup) {
+      genericGroup.classList.toggle('hidden', isConfigurableButton);
+    }
 
     this.open();
   }
@@ -405,11 +285,16 @@ export class PropertyInspector {
   adjustDim(axis, delta) {
     if (!this.tempLayout) return;
     const gridSpec = LayoutEngine.getGridSpec(this.activeOrientation, this.activeTier);
+    // A widget type's own declared minimum (e.g. the configurable button's
+    // 2x2) is a real floor, not just documentation -- clamp against it in
+    // addition to the grid's own column/row ceiling.
+    const minW = this.defaultDims?.minW || 1;
+    const minH = this.defaultDims?.minH || 1;
     if (axis === 'w') {
-      this.tempLayout.w = Math.max(1, Math.min(gridSpec.columns, this.tempLayout.w + delta));
+      this.tempLayout.w = Math.max(minW, Math.min(gridSpec.columns, this.tempLayout.w + delta));
       this.element.querySelector('#insp-w-val').textContent = this.tempLayout.w;
     } else {
-      this.tempLayout.h = Math.max(1, Math.min(gridSpec.rows, this.tempLayout.h + delta));
+      this.tempLayout.h = Math.max(minH, Math.min(gridSpec.rows, this.tempLayout.h + delta));
       this.element.querySelector('#insp-h-val').textContent = this.tempLayout.h;
     }
   }
@@ -417,11 +302,23 @@ export class PropertyInspector {
   handleSave() {
     if (!this.activeWidget) return;
 
+    // ButtonWidget's real label/binding live inside config.definition,
+    // edited via its own popover (see #fd-insp-configure-button-row) --
+    // the generic fields below are hidden and hold stale/blank values for
+    // this type, so applying them here would clobber the real config.
+    if (this.activeWidget.type === 'ButtonWidget') {
+      if (this.onSaveConfig) {
+        this.onSaveConfig(this.activeWidget.id, { layout: this.tempLayout });
+      }
+      this.close();
+      return;
+    }
+
     const labelInput = this.element.querySelector('#insp-input-label');
 
     const cleanLabel = labelInput.value.trim();
-    const rawEvent = this.getBindingControlValue('event');
-    const rawSimvar = this.getBindingControlValue('simvar');
+    const rawEvent = getBindingControlValue(this.element, 'insp', 'event');
+    const rawSimvar = getBindingControlValue(this.element, 'insp', 'simvar');
 
     const sanitizedEvent = rawEvent ? SecurityValidator.sanitizeEventName(rawEvent) : '';
     const sanitizedSimvar = rawSimvar ? SecurityValidator.sanitizeSimVar(rawSimvar) : '';

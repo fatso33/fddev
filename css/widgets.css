@@ -718,7 +718,29 @@
   cursor: pointer;
   padding: 4px 8px;
   box-sizing: border-box;
+  position: relative;
   transition: all 0.12s ease;
+}
+
+/* Corner LED for core.button (props.hasLed) -- same recipe as the retired
+   native ButtonWidget's .fd-btn-led/.on (widgets.css history), just renamed
+   to match this component's own class/state naming (.fd-comp-btn-led/.lit). */
+.fd-comp-btn-led {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #252d3d;
+  border: 1px solid #3c4860;
+  transition: all 0.2s ease;
+}
+
+.fd-comp-btn-led.lit {
+  background: var(--accent-green, #22c55e);
+  border-color: #66ff88;
+  box-shadow: 0 0 8px var(--accent-green, #22c55e);
 }
 
 .fd-comp-btn-inner:active {
