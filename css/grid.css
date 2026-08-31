@@ -120,21 +120,27 @@
    cover, see getCornerWidgetLayouts()) but invisible outside edit mode.
    Toggled by the same .edit-mode-active class toggleEditMode() already
    applies to the real page grid, so it reacts instantly without needing a
-   re-render. Uses --text-dim (a muted/disabled cue) rather than the cyan
-   grid-guide color above, since this means "off-limits", not "here's the
-   grid" -- and a dashed border/hatch rather than a solid fill, so it still
+   re-render. Uses a muted/disabled color rather than the cyan grid-guide
+   color above, since this means "off-limits", not "here's the grid" --
+   and a dashed border/hatch rather than a plain solid fill, so it still
    reads as a grid cell, just a blocked one. Sits behind the actual corner
-   widget in DOM order (appended first in mountCornerWidgets()), so it's
-   only visible in the margin columns not already covered by the opaque
-   button/badge. */
+   widget in DOM order (appended first in mountCornerWidgets()) but ABOVE
+   .fd-page-grid's own edit-mode background pattern (a separate element,
+   entirely unaware of these reserved columns, whose cyan guide gutters
+   otherwise run right underneath this margin) -- needs an actual
+   background-color, not just a low-alpha hatch, or the cyan pattern
+   showing through visually competes with it rather than reading as
+   covered. Only visible in the margin columns the opaque button/badge
+   doesn't already cover (widgets sit above this at z-index:1). */
 .fd-reserved-corner-indicator {
   opacity: 0;
   pointer-events: none;
   border-radius: 6px;
+  background-color: rgba(10, 12, 16, 0.6);
   background-image: repeating-linear-gradient(
     135deg,
-    rgba(140, 150, 172, 0.35) 0px,
-    rgba(140, 150, 172, 0.35) 4px,
+    rgba(140, 150, 172, 0.45) 0px,
+    rgba(140, 150, 172, 0.45) 4px,
     transparent 4px,
     transparent 9px
   );
