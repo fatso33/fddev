@@ -646,8 +646,8 @@ export class FlightDeckApp {
   getCornerWidgetLayouts(orientation, deviceTier, gridSpec) {
     const declaredForCols = orientation === 'landscape' ? 44 : 20;
     const scale = (declaredW) => Math.max(1, Math.min(gridSpec.columns, Math.round((declaredW / declaredForCols) * gridSpec.columns)));
-    // Each widget's grid footprint is 2 columns wider than its visible
-    // button/badge (3->5 for the menu, 5->7 for the App Profile badge) --
+    // Each widget's grid footprint is 1 column wider than its visible
+    // button/badge (3->4 for the menu, 5->6 for the App Profile badge) --
     // permanent, always-reserved padding toward the true screen edge, not
     // conditional on Fullscreen mode. Earlier attempts tried to only pad
     // when Fullscreen was actually on (first via a :fullscreen CSS
@@ -657,15 +657,17 @@ export class FlightDeckApp {
     // a Pixel 7 Pro, still clipped on a Pixel 10). A static grid-space
     // margin sidesteps needing to know the device's curvature at all: it's
     // never enough to be *wrong*, just occasionally more generous than a
-    // given phone strictly needs. visibleCols/totalCols/gap are passed
-    // into each widget's config so it can inner-align its actual button/
-    // badge within the wider cell via its own nested CSS Grid (matching
-    // this outer grid's column-width math exactly) rather than stretching
-    // to fill it -- see MenuToggleWidget/AppProfileWidget.render().
+    // given phone strictly needs. (Started at +2 columns; the user found
+    // that a touch too generous on-device and asked for +1 instead.)
+    // visibleCols/totalCols/gap are passed into each widget's config so it
+    // can inner-align its actual button/badge within the wider cell via its
+    // own nested CSS Grid (matching this outer grid's column-width math
+    // exactly) rather than stretching to fill it -- see MenuToggleWidget/
+    // AppProfileWidget.render().
     const menuVisibleW = scale(3);
-    const menuTotalW = scale(5);
+    const menuTotalW = scale(4);
     const profileVisibleW = scale(5);
-    const profileTotalW = scale(7);
+    const profileTotalW = scale(6);
     return {
       menu: {
         id: '__corner_menu__',

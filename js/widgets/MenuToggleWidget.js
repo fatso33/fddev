@@ -43,8 +43,8 @@ export class MenuToggleWidget extends BaseWidget {
     const toRemove = Array.from(root.children).filter((el) => el.tagName !== 'LINK' && el.tagName !== 'STYLE');
     toRemove.forEach((el) => el.remove());
 
-    // The widget's own grid cell (totalCols) is deliberately 2 columns
-    // wider than the visible button (visibleCols) -- permanent reserved
+    // The widget's own grid cell (totalCols) is deliberately wider than
+    // the visible button (visibleCols) -- permanent reserved
     // padding toward the true screen edge, so a curved-corner phone's
     // rounding never clips the button (see FlightDeckApp.
     // getCornerWidgetLayouts()). A nested CSS Grid with the same column

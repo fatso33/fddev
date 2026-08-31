@@ -23,11 +23,11 @@ export class AppProfileWidget extends BaseWidget {
     toRemove.forEach((el) => el.remove());
 
     // See MenuToggleWidget.js's identical comment -- the widget's own grid
-    // cell (totalCols) is 2 columns wider than the visible badge
+    // cell (totalCols) is deliberately wider than the visible badge
     // (visibleCols), permanent reserved padding toward the true screen
     // edge. A nested CSS Grid matching the outer page grid's column
     // count/gap reproduces its exact per-column pixel width, so the badge
-    // stays exactly the pre-widen 5-col size, just shifted inward.
+    // stays exactly its pre-widen size, just shifted inward.
     const totalCols = Math.max(1, this.config.totalCols || 1);
     const visibleCols = Math.max(1, Math.min(totalCols, this.config.visibleCols || totalCols));
     const gap = this.config.gap || 0;
