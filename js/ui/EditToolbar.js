@@ -8,13 +8,15 @@
  */
 
 export class EditToolbar {
-  constructor({ onAddWidget, onUndo, onSave, onCancel, onRevertPage, onCompactLayout, eventBus }) {
+  constructor({ onAddWidget, onUndo, onSave, onCancel, onRevertPage, onCompactLayout, onToggleAutoReposition, autoRepositionEnabled = false, eventBus }) {
     this.onAddWidget = onAddWidget;
     this.onUndo = onUndo;
     this.onSave = onSave;
     this.onCancel = onCancel;
     this.onRevertPage = onRevertPage;
     this.onCompactLayout = onCompactLayout;
+    this.onToggleAutoReposition = onToggleAutoReposition;
+    this.autoRepositionEnabled = autoRepositionEnabled;
     this.eventBus = eventBus;
     this.element = null;
     this.headerEl = null;
@@ -72,6 +74,11 @@ export class EditToolbar {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
           <span>Save</span>
         </button>
+
+        <button type="button" id="tb-autoreposition-btn" class="fd-tb-btn fd-tb-btn-autoreposition ${this.autoRepositionEnabled ? 'is-on' : 'is-off'}" title="Toggle Auto-Reposition: when on, dropping a widget onto another nudges it out of the way; when off, an overlapping drop is refused">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 3L4 7l4 4"/><path d="M4 7h9a4 4 0 0 1 4 4v1"/><path d="M16 21l4-4-4-4"/><path d="M20 17h-9a4 4 0 0 1-4-4v-1"/></svg>
+          <span>Nudge</span>
+        </button>
       </div>
     `;
 
@@ -98,6 +105,25 @@ export class EditToolbar {
     this.element.querySelector('#tb-compact-btn').addEventListener('click', () => {
       if (this.onCompactLayout) this.onCompactLayout();
     });
+
+    this.element.querySelector('#tb-autoreposition-btn').addEventListener('click', () => {
+      if (this.onToggleAutoReposition) this.onToggleAutoReposition();
+    });
+  }
+
+  /**
+   * Mirrors FlightDeckApp.autoRepositionEnabled onto the toggle button's
+   * visual state -- the button's click just calls onToggleAutoReposition(),
+   * the actual boolean lives in app.js, so this is how it gets pushed back
+   * down (same pattern as setOrientation()).
+   * @param {boolean} enabled
+   */
+  setAutoRepositionState(enabled) {
+    this.autoRepositionEnabled = enabled;
+    const btn = this.element?.querySelector('#tb-autoreposition-btn');
+    if (!btn) return;
+    btn.classList.toggle('is-on', enabled);
+    btn.classList.toggle('is-off', !enabled);
   }
 
   show() {

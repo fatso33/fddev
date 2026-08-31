@@ -168,7 +168,7 @@
 
 .fd-edit-toolbar-inner {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 4px;
   width: 100%;
   align-items: stretch;
@@ -237,6 +237,29 @@
   opacity: 0.92;
 }
 
+/* First toggle-style (persisted on/off state) button in this toolbar --
+   every other button above is a one-shot action. .is-on reuses the same
+   cyan-highlight look as Add (this mode is "active"); .is-off reuses
+   Undo's dim/neutral look (nothing special is happening). */
+.fd-tb-btn-autoreposition.is-on {
+  background: rgba(0, 216, 246, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+.fd-tb-btn-autoreposition.is-on:hover {
+  background: rgba(0, 216, 246, 0.25);
+}
+
+.fd-tb-btn-autoreposition.is-off {
+  background: var(--well-bg);
+  border-color: var(--btn-border);
+  color: var(--text-dim);
+}
+.fd-tb-btn-autoreposition.is-off:hover {
+  color: var(--text-white);
+  border-color: var(--text-label);
+}
+
 /* Base Widget Container */
 .fd-widget {
   position: relative;
@@ -302,6 +325,32 @@
   min-height: 44px;
   transition: all 0.1s ease-out;
   box-shadow: inset 0 0 12px rgba(0, 216, 246, 0.2);
+}
+
+/* Set after a 2-second hold over an overlap that LayoutEngine.
+   resolveSmartNudge() can't resolve (or, with Auto-Reposition off, any
+   overlap at all) -- see attachDragHandlers()'s nudge-preview timer in
+   app.js. Overrides the default cyan look with the same red used for
+   Discard/errors elsewhere, so "this drop will be refused" reads instantly. */
+.fd-drop-ghost.is-blocked {
+  border-color: var(--accent-error);
+  background: rgba(255, 51, 68, 0.14);
+  box-shadow: inset 0 0 12px rgba(255, 51, 68, 0.25);
+}
+
+/* One rendered per widget that resolveSmartNudge() would move, after the
+   same 2-second hold -- amber rather than the drop-ghost's cyan, so a
+   "this is where the dragged widget lands" vs "this is what would get
+   pushed out of the way" reads as two different things at a glance. */
+.fd-nudge-preview {
+  position: relative;
+  border: 2px dashed var(--accent-amber);
+  background: rgba(255, 170, 0, 0.12);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 4;
+  transition: all 0.1s ease-out;
+  box-shadow: inset 0 0 12px rgba(255, 170, 0, 0.2);
 }
 
 /* Edit Mode Overlay on each widget */

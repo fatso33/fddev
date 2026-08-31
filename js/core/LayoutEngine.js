@@ -423,6 +423,148 @@ export class LayoutEngine {
   }
 
   /**
+   * Determines which direction an EXISTING widget should be nudged to clear
+   * an overlapping INCOMING widget, based on which side of the existing
+   * widget's own box the overlap predominantly falls on.
+   *
+   * Compares the overlap rectangle's width vs height -- the smaller
+   * dimension is the "conflict axis" (a thin vertical sliver of overlap
+   * means the two widgets are offset mostly horizontally, i.e. a left/right
+   * conflict; a thin horizontal sliver means a top/bottom conflict). This is
+   * the standard "minimum penetration axis" heuristic from simple 2D AABB
+   * collision resolution, and matches "the overlap is majority on one side."
+   * Within that axis, the overlap rectangle's own center vs the existing
+   * widget's center picks the direction away from the overlap.
+   * @param {{col:number,row:number,w:number,h:number}} existingLayout
+   * @param {{col:number,row:number,w:number,h:number}} incomingLayout
+   * @returns {'left'|'right'|'up'|'down'}
+   */
+  static getNudgeDirection(existingLayout, incomingLayout) {
+    const ovLeft = Math.max(existingLayout.col, incomingLayout.col);
+    const ovRight = Math.min(existingLayout.col + existingLayout.w, incomingLayout.col + incomingLayout.w);
+    const ovTop = Math.max(existingLayout.row, incomingLayout.row);
+    const ovBottom = Math.min(existingLayout.row + existingLayout.h, incomingLayout.row + incomingLayout.h);
+    const overlapW = ovRight - ovLeft;
+    const overlapH = ovBottom - ovTop;
+
+    const existingCenterCol = existingLayout.col + existingLayout.w / 2;
+    const existingCenterRow = existingLayout.row + existingLayout.h / 2;
+
+    if (overlapW < overlapH) {
+      const overlapCenterCol = (ovLeft + ovRight) / 2;
+      return overlapCenterCol < existingCenterCol ? 'right' : 'left';
+    }
+    const overlapCenterRow = (ovTop + ovBottom) / 2;
+    return overlapCenterRow < existingCenterRow ? 'down' : 'up';
+  }
+
+  /**
+   * The fixed fallback direction tried when a nudge's primary direction has
+   * no room -- horizontal conflicts always fall back to "down" (matching
+   * how the old push-down cascade already worked), vertical conflicts fall
+   * back to "right", so there's always exactly one alternative tried before
+   * giving up.
+   */
+  static NUDGE_FALLBACK = { left: 'down', right: 'down', up: 'right', down: 'right' };
+
+  /**
+   * Computes where `existingLayout` would land if shifted just far enough
+   * in `direction` to clear `incomingLayout` -- its edge sits flush against
+   * the incoming widget's opposite edge, not a partial/arbitrary shift.
+   * @param {{col:number,row:number,w:number,h:number}} existingLayout
+   * @param {{col:number,row:number,w:number,h:number}} incomingLayout
+   * @param {'left'|'right'|'up'|'down'} direction
+   * @returns {{col:number,row:number,x:number,y:number,w:number,h:number}}
+   */
+  static shiftedLayout(existingLayout, incomingLayout, direction) {
+    const { w, h } = existingLayout;
+    let col = existingLayout.col;
+    let row = existingLayout.row;
+    if (direction === 'right') col = incomingLayout.col + incomingLayout.w;
+    else if (direction === 'left') col = incomingLayout.col - w;
+    else if (direction === 'down') row = incomingLayout.row + incomingLayout.h;
+    else if (direction === 'up') row = incomingLayout.row - h;
+    return { col, row, x: col - 1, y: row - 1, w, h };
+  }
+
+  /**
+   * Attempts to place `targetLayout` for `movingWidgetId`, nudging each
+   * overlapping widget in the direction away from the overlap (one fallback
+   * direction per widget, see NUDGE_FALLBACK) instead of the unconditional
+   * push-down cascade `resolveLayoutWithPushDown()` uses. Deliberately does
+   * NOT cascade further than one fallback attempt per colliding widget --
+   * "no room" is meant to be a real, reachable outcome (see `rejected`),
+   * not something the algorithm tries increasingly hard to route around.
+   *
+   * Every colliding widget must resolve successfully or the WHOLE placement
+   * is rejected -- nothing is partially applied, even if some of the
+   * colliding widgets could have been resolved. `obstacles` (e.g. the
+   * reserved corner cells from getReservedCornerEntries()) are treated as
+   * fixed/uncollidable: the incoming widget can never land on one, and a
+   * nudge can never land on one either, but obstacles themselves are never
+   * nudged.
+   * @param {string} movingWidgetId
+   * @param {{col:number,row:number,w:number,h:number}} targetLayout
+   * @param {Array<object>} widgetList - real widgets only
+   * @param {{columns:number, rows:number}} gridSpec
+   * @param {Array<{id:string, layout:object}>} [obstacles]
+   * @returns {{ok:true, widgets:Array<object>}|{ok:false}}
+   */
+  resolveSmartNudge(movingWidgetId, targetLayout, widgetList, gridSpec, obstacles = []) {
+    const list = this.normalizeLayout(widgetList).map((w) => ({ ...w, layout: { ...w.layout } }));
+    const moving = list.find((w) => w.id === movingWidgetId);
+    if (!moving) return { ok: false };
+
+    const clamped = this.clampToBounds({ ...targetLayout });
+    moving.layout = clamped;
+
+    // A real widget can never land on a reserved corner cell -- structural
+    // rule, independent of the toggle this method exists for.
+    for (const obstacle of obstacles) {
+      if (LayoutEngine.boxesIntersect(moving.layout, obstacle.layout)) {
+        return { ok: false };
+      }
+    }
+
+    const columns = gridSpec.columns || this.gridCols;
+    const rows = gridSpec.rows || Infinity;
+
+    const isValidNudgeTarget = (candidate, colliderId) => {
+      if (candidate.col < 1 || candidate.col + candidate.w - 1 > columns) return false;
+      if (candidate.row < 1 || candidate.row + candidate.h - 1 > rows) return false;
+      for (const other of list) {
+        if (other.id === colliderId || other.id === movingWidgetId) continue;
+        if (LayoutEngine.boxesIntersect(candidate, other.layout)) return false;
+      }
+      for (const obstacle of obstacles) {
+        if (LayoutEngine.boxesIntersect(candidate, obstacle.layout)) return false;
+      }
+      return true;
+    };
+
+    const colliders = list.filter(
+      (w) => w.id !== movingWidgetId && LayoutEngine.boxesIntersect(moving.layout, w.layout)
+    );
+
+    for (const collider of colliders) {
+      const primary = LayoutEngine.getNudgeDirection(collider.layout, moving.layout);
+      const fallback = LayoutEngine.NUDGE_FALLBACK[primary];
+      let resolved = null;
+      for (const direction of [primary, fallback]) {
+        const candidate = LayoutEngine.shiftedLayout(collider.layout, moving.layout, direction);
+        if (isValidNudgeTarget(candidate, collider.id)) {
+          resolved = candidate;
+          break;
+        }
+      }
+      if (!resolved) return { ok: false };
+      collider.layout = resolved;
+    }
+
+    return { ok: true, widgets: this.normalizeLayout(list) };
+  }
+
+  /**
    * Finds the next free coordinate slot that can accommodate a widget of size (w, h)
    * @param {number} w
    * @param {number} h

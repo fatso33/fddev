@@ -47,6 +47,13 @@ export class FlightDeckApp {
     this.dragStartLayout = null;
     this.dragStartPointer = null;
 
+    // Whether dropping a widget onto another nudges the existing widget out
+    // of the way (LayoutEngine.resolveSmartNudge()) or refuses the drop
+    // entirely. Defaults off -- a widget can't overlap another until the
+    // user explicitly turns nudging on via the edit toolbar. Persisted like
+    // FullscreenManager/WakeLockManager's own toggles.
+    this.autoRepositionEnabled = localStorage.getItem('flightdeck_auto_reposition') === 'true';
+
     // Undo/Redo history stack for edit mode
     this.historyStack = [];
 
@@ -233,7 +240,9 @@ export class FlightDeckApp {
       onSave: () => this.handleSaveLayout(),
       onCancel: () => this.handleCancelEdit(),
       onRevertPage: () => this.handleRevertPageToDefault(this.activePageId),
-      onCompactLayout: () => this.handleCompactLayout()
+      onCompactLayout: () => this.handleCompactLayout(),
+      onToggleAutoReposition: () => this.toggleAutoReposition(!this.autoRepositionEnabled),
+      autoRepositionEnabled: this.autoRepositionEnabled
     });
     this.editToolbar.mount(appEl);
     this.editToolbar.setOrientation(this.currentOrientation);
@@ -746,6 +755,29 @@ export class FlightDeckApp {
   }
 
   /**
+   * Resolves where `candidate` should land for `movingWidgetId` during a
+   * drag-and-drop move, respecting the Auto-Reposition toggle
+   * (this.autoRepositionEnabled, see toggleAutoReposition()): if it
+   * collides with anything and Auto-Reposition is off, the placement is
+   * rejected outright rather than nudged; otherwise
+   * LayoutEngine.resolveSmartNudge() runs (a plain no-op placement when
+   * there was nothing to nudge in the first place, i.e. no collision).
+   * Shared by attachDragHandlers()'s live 2-second hold preview and its
+   * actual drop commit, so both always agree on the outcome.
+   * @param {string} movingWidgetId
+   * @param {{col:number,row:number,w:number,h:number}} candidate
+   * @param {Array<object>} widgetList - real widgets only
+   * @param {object} gridSpec
+   * @param {Array<{id:string,layout:object}>} reserved
+   * @returns {{ok:true, widgets:Array<object>}|{ok:false}}
+   */
+  resolveDropPlacement(movingWidgetId, candidate, widgetList, gridSpec, reserved) {
+    const wouldCollide = this.layoutEngine.hasCollision(candidate, movingWidgetId, [...widgetList, ...reserved]);
+    if (wouldCollide && !this.autoRepositionEnabled) return { ok: false };
+    return this.layoutEngine.resolveSmartNudge(movingWidgetId, candidate, widgetList, gridSpec, reserved);
+  }
+
+  /**
    * Same idea as resolveWithReservedCorners() but for building a whole
    * layout from scratch rather than moving one widget: inserts each item in
    * `items` one at a time via resolveLayoutWithPushDown() (so later
@@ -957,6 +989,19 @@ export class FlightDeckApp {
   }
 
   /**
+   * Flips whether dropping a widget onto another nudges the existing widget
+   * out of the way (LayoutEngine.resolveSmartNudge(), see attachDragHandlers)
+   * or refuses the drop outright. Persisted so the preference survives a
+   * reload, same pattern as FullscreenManager/WakeLockManager.
+   * @param {boolean} enabled
+   */
+  toggleAutoReposition(enabled) {
+    this.autoRepositionEnabled = enabled;
+    localStorage.setItem('flightdeck_auto_reposition', String(enabled));
+    this.editToolbar?.setAutoRepositionState(enabled);
+  }
+
+  /**
    * Generic long-press (500ms, cancels if the pointer moves more than 8px
    * or is released early) gesture binder. Used for the App Profile badge so
    * a stray tap doesn't pop open the App Profiles popover.
@@ -1026,6 +1071,19 @@ export class FlightDeckApp {
       this.dragStartLayout = { ...widgetInstance.layout };
       this.dragStartPointer = { x: e.clientX, y: e.clientY };
 
+      // Page/gridSpec/reserved-corners don't change mid-drag (a single drag
+      // gesture never spans a page switch or orientation change) -- computed
+      // once here and reused by both the live nudge preview below and the
+      // actual drop commit in endDrag(), instead of recomputing per call.
+      const dragPage = this.activeProfile.getPage(this.activePageId);
+      const dragGridSpec = dragPage
+        ? (dragPage.getGrid(this.currentOrientation, this.currentDeviceTier) || LayoutEngine.getGridSpec(this.currentOrientation, this.currentDeviceTier))
+        : LayoutEngine.getGridSpec(this.currentOrientation, this.currentDeviceTier);
+      if (dragGridSpec && dragGridSpec.columns) {
+        this.layoutEngine.gridCols = dragGridSpec.columns;
+      }
+      const dragReserved = this.getReservedCornerEntries(this.currentOrientation, this.currentDeviceTier, dragGridSpec);
+
       // Long press detection timer (500ms threshold)
       longPressTimer = setTimeout(() => {
         longPressFired = true;
@@ -1036,6 +1094,7 @@ export class FlightDeckApp {
 
         const existingGhost = this.gridContainer.querySelector('.fd-drop-ghost');
         if (existingGhost) existingGhost.remove();
+        clearNudgePreview();
 
         this.draggedWidget = null;
 
@@ -1069,6 +1128,49 @@ export class FlightDeckApp {
       dropGhost.style.gridRow = `${this.dragStartLayout.row} / span ${this.dragStartLayout.h}`;
       dropGhost.style.display = 'block';
 
+      // Preview of what a drop would do to the widget(s) it currently
+      // overlaps -- LayoutEngine.resolveSmartNudge() run speculatively
+      // (never persisted) once the candidate cell has been held steady for
+      // 2s, so idle dragging-around doesn't constantly recompute/redraw
+      // this. Only showing is gated behind the delay; clearing (once the
+      // candidate cell changes, or the drag ends) is instant. All state is
+      // local to this drag gesture, same as dropGhost/rafId above.
+      let nudgePreviewTimer = null;
+      let nudgePreviewKey = null;
+      let nudgePreviewEls = [];
+
+      const clearNudgePreview = () => {
+        if (nudgePreviewTimer) {
+          clearTimeout(nudgePreviewTimer);
+          nudgePreviewTimer = null;
+        }
+        nudgePreviewEls.forEach((ghostEl) => ghostEl.remove());
+        nudgePreviewEls = [];
+        if (dropGhost) dropGhost.classList.remove('is-blocked');
+      };
+
+      const showNudgePreview = (candidate) => {
+        const currentWidgets = dragPage ? dragPage.getWidgets(this.currentOrientation, this.currentDeviceTier) : [];
+        const result = this.resolveDropPlacement(widgetInstance.id, candidate, currentWidgets, dragGridSpec, dragReserved);
+
+        if (!result.ok) {
+          if (dropGhost) dropGhost.classList.add('is-blocked');
+          return;
+        }
+
+        result.widgets.forEach((w) => {
+          if (w.id === widgetInstance.id) return;
+          const original = currentWidgets.find((ow) => ow.id === w.id);
+          if (!original || (original.layout.col === w.layout.col && original.layout.row === w.layout.row)) return;
+          const ghostEl = document.createElement('div');
+          ghostEl.className = 'fd-nudge-preview';
+          ghostEl.style.gridColumn = `${w.layout.col} / span ${w.layout.w}`;
+          ghostEl.style.gridRow = `${w.layout.row} / span ${w.layout.h}`;
+          this.gridContainer.appendChild(ghostEl);
+          nudgePreviewEls.push(ghostEl);
+        });
+      };
+
       let rafId = null;
       let lastClientX = e.clientX;
       let lastClientY = e.clientY;
@@ -1093,6 +1195,19 @@ export class FlightDeckApp {
           dropGhost.style.gridColumn = `${clampedCol} / span ${this.dragStartLayout.w}`;
           dropGhost.style.gridRow = `${clampedRow} / span ${this.dragStartLayout.h}`;
         }
+
+        const candidate = { col: clampedCol, row: clampedRow, w: this.dragStartLayout.w, h: this.dragStartLayout.h };
+        const key = `${clampedCol}:${clampedRow}`;
+        if (key !== nudgePreviewKey) {
+          nudgePreviewKey = key;
+          clearNudgePreview();
+          const currentWidgets = dragPage ? dragPage.getWidgets(this.currentOrientation, this.currentDeviceTier) : [];
+          const overlapsSomething = this.layoutEngine.hasCollision(candidate, widgetInstance.id, [...currentWidgets, ...dragReserved]);
+          if (overlapsSomething) {
+            nudgePreviewTimer = setTimeout(() => showNudgePreview(candidate), 2000);
+          }
+        }
+
         rafId = null;
       };
 
@@ -1146,6 +1261,7 @@ export class FlightDeckApp {
         if (dropGhost) {
           dropGhost.remove();
         }
+        clearNudgePreview();
 
         if (longPressFired) {
           this.draggedWidget = null;
@@ -1170,37 +1286,35 @@ export class FlightDeckApp {
             h: this.dragStartLayout.h
           };
 
-          const page = this.activeProfile.getPage(this.activePageId);
-          if (page) {
-            this.saveHistorySnapshot();
+          if (dragPage) {
+            // Auto-Reposition on: nudges each overlapped widget out of the
+            // way (LayoutEngine.resolveSmartNudge()), or rejects the whole
+            // drop if any of them has nowhere valid to go. Off: any overlap
+            // at all is rejected outright. Either way, a reserved corner
+            // cell can never be the drop target -- see resolveDropPlacement().
+            const currentWidgets = dragPage.getWidgets(this.currentOrientation, this.currentDeviceTier);
+            const result = this.resolveDropPlacement(widgetInstance.id, candidate, currentWidgets, dragGridSpec, dragReserved);
 
-            const gridSpec = page.getGrid(this.currentOrientation, this.currentDeviceTier) || LayoutEngine.getGridSpec(this.currentOrientation, this.currentDeviceTier);
-            if (gridSpec && gridSpec.columns) {
-              this.layoutEngine.gridCols = gridSpec.columns;
+            if (!result.ok) {
+              this.showToast(this.autoRepositionEnabled
+                ? "Can't place there -- no room to move the widget in the way."
+                : 'Auto-Reposition is off -- that spot is occupied.');
+              // No commit: the dragged widget's own layout was never
+              // mutated during drag (only a CSS transform, already cleared
+              // above), so it's already back at its original position.
+            } else {
+              this.saveHistorySnapshot();
+              dragPage.setWidgets(this.currentOrientation, this.currentDeviceTier, result.widgets);
+
+              // Sync all DOM widget positions
+              this.activeWidgetInstances.forEach((inst) => {
+                const matching = result.widgets.find((w) => w.id === inst.id);
+                if (matching) {
+                  inst.layout = { ...matching.layout };
+                  inst.applyLayoutStyles();
+                }
+              });
             }
-
-            // Cascading push-down reordering & auto-compact for active tier +
-            // orientation, plus a reserved-corner eviction pass (menu/App
-            // Profile badge cells) -- see resolveWithReservedCorners().
-            const reserved = this.getReservedCornerEntries(this.currentOrientation, this.currentDeviceTier, gridSpec);
-            const currentWidgets = page.getWidgets(this.currentOrientation, this.currentDeviceTier);
-            const updatedWidgets = this.resolveWithReservedCorners(
-              widgetInstance.id,
-              candidate,
-              currentWidgets,
-              reserved
-            );
-
-            page.setWidgets(this.currentOrientation, this.currentDeviceTier, updatedWidgets);
-
-            // Sync all DOM widget positions
-            this.activeWidgetInstances.forEach((inst) => {
-              const matching = updatedWidgets.find((w) => w.id === inst.id);
-              if (matching) {
-                inst.layout = { ...matching.layout };
-                inst.applyLayoutStyles();
-              }
-            });
           }
         }
 
