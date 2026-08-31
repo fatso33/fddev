@@ -140,20 +140,20 @@ body {
 }
 
 .aircraft-badge {
-  /* Fixed magenta identity (text, border, and floor line) -- unlike the
+  /* Fixed green identity (text, border, and floor line) -- unlike the
      menu button below, this doesn't track any connection state; it's
      always the same accent, visually distinct from the menu widget's
      neutral resting state. */
   background: var(--badge-bg);
-  border: 1px solid var(--accent-magenta);
+  border: 1px solid var(--accent-green);
   border-radius: 6px;
   padding: 6px 12px;
   font-family: 'Chakra Petch', sans-serif;
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.5px;
-  color: var(--accent-magenta);
-  box-shadow: inset 0 -2px 0 0 var(--accent-magenta);
+  color: var(--accent-green);
+  box-shadow: inset 0 -2px 0 0 var(--accent-green);
   cursor: pointer;
 }
 
