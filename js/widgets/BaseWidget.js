@@ -83,7 +83,6 @@ export class BaseWidget {
     this.element.className = `fd-widget fd-widget-${this.type.toLowerCase()} fd-orient-${orient}`;
     this.element.dataset.widgetId = this.id;
     this.element.dataset.orientation = orient;
-    this.applyLayoutStyles();
 
     // Initialize Shadow DOM boundary for style and markup encapsulation (v2.2 Spec)
     this.shadowRoot = this.element.attachShadow({ mode: 'open' });
@@ -92,6 +91,14 @@ export class BaseWidget {
     this.render();
     this.registerDynamicBindings();
     container.appendChild(this.element);
+
+    // Must run AFTER the element is actually connected to `container` --
+    // applyLayoutStyles() reads the grid's inherited --row-height/--grid-gap
+    // custom properties via getComputedStyle(), which only resolves
+    // correctly once this element is really part of that container's DOM
+    // subtree. Calling it before append (the original order) silently fell
+    // back to hardcoded defaults instead of the tier's real values.
+    this.applyLayoutStyles();
   }
 
   /**
@@ -183,6 +190,25 @@ export class BaseWidget {
     this.element.style.gridColumnEnd = `span ${w}`;
     this.element.style.gridRowStart = `${row}`;
     this.element.style.gridRowEnd = `span ${h}`;
+
+    // The 44px touch-target floor every widget wants (see grid.css) can
+    // exceed a short widget's own actual grid allocation -- e.g. h:2 on a
+    // tier where 2*rowHeight+gap comes to less than 44px. CSS Grid doesn't
+    // grow a track to fit an oversized min-height, so the widget just
+    // overflows its own cell and bleeds into the row below instead (first
+    // found and fixed only for the two corner widgets; this generalizes
+    // that fix to every widget, since any h:2 widget anywhere hits the
+    // same bug on those tiers). Cap the floor at the widget's own
+    // allocated height, read live from the grid's custom properties
+    // (inherited from whichever grid container -- .fd-page-grid or
+    // .fd-corner-overlay -- this element's shadow host sits in), so a
+    // widget still gets a comfortable minimum for genuinely short spans
+    // but never demands more room than its own declared h reserves.
+    const cs = getComputedStyle(this.element);
+    const rowHeight = parseFloat(cs.getPropertyValue('--row-height')) || 16;
+    const gap = parseFloat(cs.getPropertyValue('--grid-gap')) || 0;
+    const ownHeight = h * rowHeight + (h - 1) * gap;
+    this.element.style.minHeight = `${Math.min(44, ownHeight)}px`;
   }
 
   /**

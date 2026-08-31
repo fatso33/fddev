@@ -762,7 +762,7 @@ export class FlightDeckApp {
    * rejected outright rather than nudged; otherwise
    * LayoutEngine.resolveSmartNudge() runs (a plain no-op placement when
    * there was nothing to nudge in the first place, i.e. no collision).
-   * Shared by attachDragHandlers()'s live 2-second hold preview and its
+   * Shared by attachDragHandlers()'s live 1-second hold preview and its
    * actual drop commit, so both always agree on the outcome.
    * @param {string} movingWidgetId
    * @param {{col:number,row:number,w:number,h:number}} candidate
@@ -1131,7 +1131,7 @@ export class FlightDeckApp {
       // Preview of what a drop would do to the widget(s) it currently
       // overlaps -- LayoutEngine.resolveSmartNudge() run speculatively
       // (never persisted) once the candidate cell has been held steady for
-      // 2s, so idle dragging-around doesn't constantly recompute/redraw
+      // 1s, so idle dragging-around doesn't constantly recompute/redraw
       // this. Only showing is gated behind the delay; clearing (once the
       // candidate cell changes, or the drag ends) is instant. All state is
       // local to this drag gesture, same as dropGhost/rafId above.
@@ -1204,7 +1204,7 @@ export class FlightDeckApp {
           const currentWidgets = dragPage ? dragPage.getWidgets(this.currentOrientation, this.currentDeviceTier) : [];
           const overlapsSomething = this.layoutEngine.hasCollision(candidate, widgetInstance.id, [...currentWidgets, ...dragReserved]);
           if (overlapsSomething) {
-            nudgePreviewTimer = setTimeout(() => showNudgePreview(candidate), 2000);
+            nudgePreviewTimer = setTimeout(() => showNudgePreview(candidate), 1000);
           }
         }
 

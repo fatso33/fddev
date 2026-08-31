@@ -260,32 +260,26 @@
   border-color: var(--text-label);
 }
 
-/* Base Widget Container */
+/* Base Widget Container
+   min-height (a 44px touch-target floor, capped at the widget's own actual
+   grid allocation) is set inline per-widget by BaseWidget.applyLayoutStyles()
+   instead of a flat value here -- a flat 44px floor overflows any widget
+   whose own h*rowHeight+gap comes to less than 44px (any h:2 widget, on
+   most tiers), since CSS Grid doesn't grow a track to fit an oversized
+   min-height; the item just bleeds into the row below instead. First found
+   and fixed only for the two corner widgets (menu toggle, App Profile
+   badge) via a same-purpose per-ID override here -- since removed, now
+   that BaseWidget's general fix covers every widget including those two. */
 .fd-widget {
   position: relative;
   display: flex;
   flex-direction: column;
   border-radius: 8px;
-  min-height: 44px;
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
   isolation: isolate;
   z-index: 1;
-}
-
-/* The two fixed 2-row-tall corner widgets (menu toggle, App Profile badge)
-   render inside .fd-corner-overlay above at exactly 2 grid rows worth of
-   pixels (e.g. 2*18px row-height + 3px gap = 39px in mobile landscape) --
-   less than .fd-widget's 44px touch-target floor above, which would
-   otherwise stretch their box taller than their allocated grid cell and
-   visibly bleed into the real widget row directly below them (CSS Grid
-   doesn't grow a track to accommodate an oversized item's min-height, so
-   the item just overflows its cell instead). Reset it here so their
-   rendered height always exactly matches their 2-row grid allocation. */
-[data-widget-id="__corner_menu__"],
-[data-widget-id="__corner_profile__"] {
-  min-height: 0;
 }
 
 .fd-widget.edit-active {
