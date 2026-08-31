@@ -586,7 +586,13 @@ export class FlightDeckApp {
     this.gridContainer.className = `fd-page-grid ${this.isEditMode ? 'edit-mode-active' : ''}`;
     this.contentArea.appendChild(this.gridContainer);
 
-    const gridSpec = page.getGrid(orientation, deviceTier) || LayoutEngine.getGridSpec(orientation, deviceTier);
+    const gridSpec = { ...(page.getGrid(orientation, deviceTier) || LayoutEngine.getGridSpec(orientation, deviceTier)) };
+    // Square cells: derive row height from the actually-rendered column
+    // width instead of trusting the tier's static default (or a stale
+    // rowHeight baked into an old saved page's grid spec). Measured against
+    // gridContainer since it's already attached to #content-area above.
+    const liveColWidth = this.layoutEngine.measureColumnWidth(this.gridContainer, gridSpec);
+    if (liveColWidth) gridSpec.rowHeight = liveColWidth;
     this.layoutEngine.applyGridToContainer(this.gridContainer, gridSpec);
 
     // Get widgets for the active tier + orientation. Each (tier,
@@ -808,8 +814,15 @@ export class FlightDeckApp {
   mountCornerWidgets(orientation, deviceTier, gridSpec) {
     const overlay = document.createElement('div');
     overlay.className = 'fd-corner-overlay';
-    this.layoutEngine.applyGridToContainer(overlay, gridSpec);
+    // Append before measuring/applying: getBoundingClientRect() on a
+    // disconnected element returns a zero-width rect, which would silently
+    // fall back and skip the square-cell derivation below (same class of
+    // mount-order hazard as BaseWidget.applyLayoutStyles()).
     this.contentArea.appendChild(overlay);
+    const resolvedGridSpec = { ...gridSpec };
+    const liveColWidth = this.layoutEngine.measureColumnWidth(overlay, resolvedGridSpec);
+    if (liveColWidth) resolvedGridSpec.rowHeight = liveColWidth;
+    this.layoutEngine.applyGridToContainer(overlay, resolvedGridSpec);
     this.cornerOverlayEl = overlay;
     // Reacts to toggleEditMode() toggling this same class -- set here too
     // so it starts correct if a page is (re)rendered while already editing.
@@ -1076,9 +1089,19 @@ export class FlightDeckApp {
       // once here and reused by both the live nudge preview below and the
       // actual drop commit in endDrag(), instead of recomputing per call.
       const dragPage = this.activeProfile.getPage(this.activePageId);
-      const dragGridSpec = dragPage
+      const dragGridSpec = { ...(dragPage
         ? (dragPage.getGrid(this.currentOrientation, this.currentDeviceTier) || LayoutEngine.getGridSpec(this.currentOrientation, this.currentDeviceTier))
-        : LayoutEngine.getGridSpec(this.currentOrientation, this.currentDeviceTier);
+        : LayoutEngine.getGridSpec(this.currentOrientation, this.currentDeviceTier)) };
+      // Keep drag/nudge pixel math (pixelToGridCell's fallback path)
+      // consistent with what's actually rendered (square-cell live row
+      // height), not the tier's static default -- set explicitly rather
+      // than relying on the last renderActivePage() call having left it
+      // correct, matching the existing gridCols assignment below.
+      const dragLiveColWidth = this.layoutEngine.measureColumnWidth(this.gridContainer, dragGridSpec);
+      if (dragLiveColWidth) {
+        dragGridSpec.rowHeight = dragLiveColWidth;
+        this.layoutEngine.defaultRowHeight = dragLiveColWidth;
+      }
       if (dragGridSpec && dragGridSpec.columns) {
         this.layoutEngine.gridCols = dragGridSpec.columns;
       }

@@ -89,6 +89,25 @@ export class LayoutEngine {
   }
 
   /**
+   * Measures the actual rendered column width of a connected grid container,
+   * so row height can be derived to match it (square cells at any viewport
+   * size). Returns null if the container isn't connected / has no
+   * measurable width yet, so callers can fall back to a static default.
+   * @param {HTMLElement} container
+   * @param {{columns: number, gap: number}} gridSpec
+   * @returns {number|null}
+   */
+  measureColumnWidth(container, gridSpec) {
+    if (!container || !gridSpec) return null;
+    const rect = container.getBoundingClientRect();
+    if (!rect.width) return null;
+    const cols = gridSpec.columns || this.gridCols;
+    const gap = gridSpec.gap !== undefined ? gridSpec.gap : this.gap;
+    const colWidth = (rect.width - (cols - 1) * gap) / cols;
+    return colWidth > 0 ? colWidth : null;
+  }
+
+  /**
    * Initializes hardware orientation listener and window resize watcher
    * @param {Function} onChangeCallback
    * @returns {Function} Unsubscribe cleanup function
