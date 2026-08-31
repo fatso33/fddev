@@ -74,6 +74,23 @@ export class MenuToggleWidget extends BaseWidget {
   }
 
   /**
+   * Toggles the fullscreen curved-corner-clearance class. Driven by
+   * FlightDeckApp (document.fullscreenElement / 'fullscreenchange'), not a
+   * CSS :fullscreen selector -- this button renders inside a real Shadow
+   * DOM (BaseWidget.preloadStyles()'s adoptedStyleSheets), and a stylesheet
+   * adopted into a shadow root can only match ancestors within that same
+   * shadow tree. <html> (where :fullscreen actually lives) is outside it,
+   * so `:fullscreen .garmin-menu-btn` can never match no matter what state
+   * fullscreen is in -- same reason .bridge-connected/.sim-connected above
+   * are plain classes toggled by app.js rather than some outer selector.
+   * @param {boolean} active
+   */
+  setFullscreenInset(active) {
+    if (!this.buttonEl) return;
+    this.buttonEl.classList.toggle('fs-inset', Boolean(active));
+  }
+
+  /**
    * Swaps the hamburger icon for a pencil while the app is in page-edit
    * mode. Distinct from BaseWidget.setEditMode()/isEditMode -- app.js never
    * calls that generic edit-mode machinery on corner widgets, since they're

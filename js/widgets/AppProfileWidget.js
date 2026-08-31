@@ -48,4 +48,16 @@ export class AppProfileWidget extends BaseWidget {
       SecurityValidator.setText(this.badgeEl, text);
     }
   }
+
+  /**
+   * See MenuToggleWidget.setFullscreenInset() for why this is a JS-toggled
+   * class rather than a CSS :fullscreen selector -- this badge renders
+   * inside a real Shadow DOM, and :fullscreen only ever matches <html>,
+   * outside that shadow tree.
+   * @param {boolean} active
+   */
+  setFullscreenInset(active) {
+    if (!this.badgeEl) return;
+    this.badgeEl.classList.toggle('fs-inset', Boolean(active));
+  }
 }

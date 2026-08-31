@@ -219,6 +219,12 @@ export class FlightDeckApp {
       onEnter: () => this.showToast('Fullscreen on — use the Fullscreen toggle in the menu to show the status bar again.')
     });
     this.fullscreen.bindToggle(document.getElementById('fullscreen-toggle-checkbox'));
+
+    // One-time listener (not inside wireCornerInteractions(), which reruns
+    // every render) -- fullscreen can be entered/exited without a render
+    // happening at all, and the corner widgets need to react either way.
+    // See updateFullscreenInset().
+    document.addEventListener('fullscreenchange', () => this.updateFullscreenInset());
   }
 
   initUIComponents() {
@@ -438,6 +444,22 @@ export class FlightDeckApp {
       bridgeConnected: this.bridgeConnected,
       simConnected: this.simConnected
     });
+  }
+
+  /**
+   * Pushes the current real Fullscreen API state onto both corner widgets
+   * as a JS-toggled class (see MenuToggleWidget/AppProfileWidget's
+   * setFullscreenInset() for why this can't just be a CSS :fullscreen
+   * selector). Called both from mountCornerWidgets() -- since the corner
+   * widgets are destroyed/recreated every render and would otherwise lose
+   * the class -- and from a one-time 'fullscreenchange' listener (see
+   * initHeaderControls()), since fullscreen can toggle without a render
+   * happening at all.
+   */
+  updateFullscreenInset() {
+    const active = Boolean(document.fullscreenElement);
+    this.menuToggleWidget?.setFullscreenInset(active);
+    this.appProfileWidget?.setFullscreenInset(active);
   }
 
   showToast(message) {
@@ -762,6 +784,7 @@ export class FlightDeckApp {
     this.appProfileWidget = profileInstance;
 
     this.updateMenuButtonStatus();
+    this.updateFullscreenInset();
     this.wireCornerInteractions();
   }
 
