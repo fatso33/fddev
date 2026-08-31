@@ -140,15 +140,20 @@ body {
 }
 
 .aircraft-badge {
+  /* Fixed magenta identity (text, border, and floor line) -- unlike the
+     menu button below, this doesn't track any connection state; it's
+     always the same accent, visually distinct from the menu widget's
+     neutral resting state. */
   background: var(--badge-bg);
-  border: 1px solid var(--badge-border);
+  border: 1px solid var(--accent-magenta);
   border-radius: 6px;
   padding: 6px 12px;
   font-family: 'Chakra Petch', sans-serif;
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.5px;
-  color: var(--accent-cyan);
+  color: var(--accent-magenta);
+  box-shadow: inset 0 -2px 0 0 var(--accent-magenta);
   cursor: pointer;
 }
 
@@ -158,31 +163,35 @@ body {
      which is exactly the space Fullscreen mode's status-bar removal made
      this button newly vulnerable to. Left-aligned flex child instead. */
   background: var(--card-bg);
-  border: 1px solid var(--card-border);
+  border: 1px solid;
   border-radius: 8px;
   padding: 6px 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 2px 8px var(--shadow-color);
+  /* Border and floor line both use currentColor rather than a fixed accent,
+     so they automatically track whichever state color .bridge-connected/
+     .sim-connected below sets on `color` -- no separate color variable to
+     keep in sync with each connection state. */
+  border-color: currentColor;
+  box-shadow: 0 2px 8px var(--shadow-color), inset 0 -2px 0 0 currentColor;
   color: var(--text-white);
-  transition: color 0.2s ease, border-color 0.2s ease;
+  transition: color 0.2s ease;
 }
 
 /* Connection status, folded into the menu button itself (replaces the old
    separate PC Bridge / Simulator status dots) — see app.js's BRIDGE_STATUS/
    SIM_STATUS subscriptions. Simulator connected implies PC Bridge is too,
    so .sim-connected's magenta takes priority over .bridge-connected's cyan
-   whenever both classes are present. */
+   whenever both classes are present. Only `color` needs to change per state
+   -- the border and floor line above inherit it via currentColor. */
 .garmin-menu-btn.bridge-connected {
   color: var(--accent-cyan);
-  border-color: var(--accent-cyan);
 }
 
 .garmin-menu-btn.sim-connected {
   color: var(--accent-magenta);
-  border-color: var(--accent-magenta);
 }
 
 /* Dropdown Menu Drawer — a static child of the zero-height .top-bar
