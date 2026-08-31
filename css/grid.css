@@ -61,32 +61,55 @@
 }
 
 /* Edit Mode Grid Guides Overlay
-   Two bugs in the old version of this rule made the dot grid visibly drift
-   away from the actual widget grid the more columns/rows a page had:
-   1. background-size used `100% / cols` and plain `row-height` for its
-      tile size, silently assuming zero gap between tracks -- real CSS Grid
-      columns/rows are `(container - (n-1)*gap) / n`, so every tile after
-      the first was already off, and the error compounded every column/row.
-   2. background-origin defaults to padding-box, but this element has a
-      4px padding and its real grid *items* live in the content box (inset
-      by that padding) -- a fixed 4px origin mismatch on top of the above.
-   Fixed by working the gap into the tile-size calc() for both axes
-   (row-height's fix is exact, pure px math; the column fix is correct on
-   average but can be off by a device-pixel or so on some tracks, since
-   1fr division doesn't always split leftover space perfectly evenly --
-   imperceptible in practice) and setting background-origin: content-box
-   so the pattern's own origin lines up with where grid items actually
-   start. */
+   A first fix (see git history) made the tile size account for the grid's
+   own gap, which stopped the pattern drifting away from the real widget
+   grid the more columns/rows a page had -- but a thin 1px *line* drawn at
+   each tile's start (the previous approach) still visibly disagreed with
+   a real widget's edges on two sides: a widget's left/top edge sits flush
+   with where a column/row *starts* (correct, lines up), but its right/
+   bottom edge sits flush with where the *gap before the next column/row*
+   starts -- gap-px *before* the next tile's line, not on it. A single
+   thin line drawn at each tile boundary can only ever look right on one
+   of those two sides at once, which read as "the widget bleeds past the
+   line on top-left, sits short of it on bottom-right." It also made any
+   sub-pixel column-width rounding (CSS Grid's 1fr division isn't always
+   perfectly even) much more visible, since the error was being judged
+   against a hard 1px target instead of something wider.
+   Fixed by shading the *entire gap* as a translucent band per axis
+   (repeating-linear-gradient, whose own last color-stop defines the
+   repeat interval -- no separate background-size math to keep in sync
+   with the gradient, unlike the line-based version) rather than drawing a
+   single line at an inherently ambiguous position. A real widget's edges
+   now bound that gutter band exactly on *both* sides by construction
+   (CSS Grid's gap is, definitionally, the space between two widgets'
+   edges), and the same sub-pixel rounding that used to be visible against
+   a 1px line is imperceptible against a several-px-wide band.
+   background-origin: content-box still matters here -- this element has
+   padding, but the grid's real items live in the content box (inset by
+   that padding), so the pattern's origin needs to match. */
 .fd-page-grid.edit-mode-active {
+  --fd-grid-guide-colw: calc((100% - (var(--grid-cols, 20) - 1) * var(--grid-gap, 8px)) / var(--grid-cols, 20));
   background-image:
-    linear-gradient(to right, rgba(0, 216, 246, 0.08) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0, 216, 246, 0.08) 1px, transparent 1px);
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent var(--fd-grid-guide-colw),
+      rgba(0, 216, 246, 0.16) var(--fd-grid-guide-colw),
+      rgba(0, 216, 246, 0.16) calc(var(--fd-grid-guide-colw) + var(--grid-gap, 8px))
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent var(--row-height, 16px),
+      rgba(0, 216, 246, 0.16) var(--row-height, 16px),
+      rgba(0, 216, 246, 0.16) calc(var(--row-height, 16px) + var(--grid-gap, 8px))
+    );
   background-origin: content-box;
-  background-size:
-    calc((100% - (var(--grid-cols, 20) - 1) * var(--grid-gap, 8px)) / var(--grid-cols, 20) + var(--grid-gap, 8px))
-    calc(var(--row-height, 16px) + var(--grid-gap, 8px));
   border: 1px dashed rgba(0, 216, 246, 0.4);
-  border-radius: 8px;
+  /* Small enough to never intrude into the first real column/row's own
+     guide band, even on the tightest tier (88 columns can be under 10px
+     each) -- an 8px radius here used to visibly clip into it. */
+  border-radius: 4px;
   padding: 4px;
 }
 
