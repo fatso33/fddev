@@ -200,14 +200,17 @@ body {
    (see .fd-corner-overlay, grid.css) at a height that varies slightly by
    tier/orientation's row-height; this fixed offset is a close approximation
    of that corner widget's bottom edge, same kind of fixed-offset tolerance
-   the dropdown has always used. */
+   the dropdown has always used.
+   `left` here is just a fallback -- wireCornerInteractions() in app.js sets
+   it inline from the menu button's actual getBoundingClientRect() every
+   time the dropdown opens, so it visually extends from the button itself
+   (which moves with orientation/tier) rather than sitting centered. */
 .menu-dropdown {
   position: absolute;
   top: 50px;
-  left: 50%;
-  transform: translateX(-50%) translateY(-10px);
-  width: calc(100% - 32px);
-  max-width: 440px;
+  left: 12px;
+  transform: translateY(-10px);
+  width: min(280px, calc(100% - 24px));
   background: var(--menu-dropdown-bg);
   border: 1px solid var(--menu-dropdown-border);
   border-radius: 12px;
@@ -222,14 +225,14 @@ body {
   -webkit-overflow-scrolling: touch;
   opacity: 0;
   pointer-events: none;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 9000;
 }
 
 .menu-dropdown.open {
   opacity: 1;
   pointer-events: auto;
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
 }
 
 .menu-item-btn {

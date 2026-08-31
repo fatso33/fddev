@@ -833,6 +833,17 @@ export class FlightDeckApp {
       if (editBtn) {
         editBtn.style.display = (this.activePageId === 'page_settings') ? 'none' : 'flex';
       }
+      // Anchor the dropdown to the menu button's actual position rather
+      // than the CSS fallback -- the button's x-position shifts with
+      // orientation/tier (corner widget footprint scales, see
+      // getCornerWidgetLayouts()), so this has to be computed fresh on
+      // every open rather than fixed in CSS. Only set while opening (not
+      // closing) so nothing shifts position mid-close-animation.
+      const opening = !menuDropdown.classList.contains('open');
+      if (opening) {
+        const btnRect = menuBtn.getBoundingClientRect();
+        menuDropdown.style.left = `${Math.round(btnRect.left)}px`;
+      }
       menuDropdown.classList.toggle('open');
     });
   }
