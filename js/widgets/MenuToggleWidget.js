@@ -43,17 +43,40 @@ export class MenuToggleWidget extends BaseWidget {
     const toRemove = Array.from(root.children).filter((el) => el.tagName !== 'LINK' && el.tagName !== 'STYLE');
     toRemove.forEach((el) => el.remove());
 
+    // The widget's own grid cell (totalCols) is deliberately 2 columns
+    // wider than the visible button (visibleCols) -- permanent reserved
+    // padding toward the true screen edge, so a curved-corner phone's
+    // rounding never clips the button (see FlightDeckApp.
+    // getCornerWidgetLayouts()). A nested CSS Grid with the same column
+    // count/gap as the outer page grid reproduces its exact per-column
+    // pixel width, so the button lands at exactly the same visual size as
+    // the pre-widen 3-col cell, just shifted inward -- rather than
+    // stretching to fill the wider cell.
+    const totalCols = Math.max(1, this.config.totalCols || 1);
+    const visibleCols = Math.max(1, Math.min(totalCols, this.config.visibleCols || totalCols));
+    const gap = this.config.gap || 0;
+
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'grid';
+    wrapper.style.width = '100%';
+    wrapper.style.height = '100%';
+    wrapper.style.gridTemplateColumns = `repeat(${totalCols}, minmax(0, 1fr))`;
+    wrapper.style.gap = `${gap}px`;
+
     const btn = document.createElement('button');
     btn.className = 'garmin-menu-btn';
-    // Full-bleed within the widget's grid cell — main.css's .garmin-menu-btn
-    // rule has no width/height:100% of its own (it was previously sized by
-    // .top-bar's flex layout instead), so set it directly here rather than
-    // fighting adoptedStyleSheets cascade ordering with a second stylesheet.
-    btn.style.width = '100%';
-    btn.style.height = '100%';
+    // Right-aligned within the wider cell (toward the page's center, away
+    // from the true left screen edge) via the trailing visibleCols columns.
+    btn.style.gridColumn = `${totalCols - visibleCols + 1} / span ${visibleCols}`;
+    // A grid item's default min-width is `auto` (its content's own min
+    // size), which can overflow past an assigned track that's narrower
+    // than the button's icon+padding -- shrink instead of spilling into
+    // the reserved padding columns whenever that happens.
+    btn.style.minWidth = '0';
 
     this.buttonEl = btn;
-    root.appendChild(btn);
+    wrapper.appendChild(btn);
+    root.appendChild(wrapper);
     this.setAppEditMode(Boolean(this.config.appEditMode));
     this.updateVisualState();
   }
@@ -71,23 +94,6 @@ export class MenuToggleWidget extends BaseWidget {
     if (!this.buttonEl) return;
     this.buttonEl.classList.toggle('bridge-connected', Boolean(this.bridgeConnected));
     this.buttonEl.classList.toggle('sim-connected', Boolean(this.simConnected));
-  }
-
-  /**
-   * Toggles the fullscreen curved-corner-clearance class. Driven by
-   * FlightDeckApp (document.fullscreenElement / 'fullscreenchange'), not a
-   * CSS :fullscreen selector -- this button renders inside a real Shadow
-   * DOM (BaseWidget.preloadStyles()'s adoptedStyleSheets), and a stylesheet
-   * adopted into a shadow root can only match ancestors within that same
-   * shadow tree. <html> (where :fullscreen actually lives) is outside it,
-   * so `:fullscreen .garmin-menu-btn` can never match no matter what state
-   * fullscreen is in -- same reason .bridge-connected/.sim-connected above
-   * are plain classes toggled by app.js rather than some outer selector.
-   * @param {boolean} active
-   */
-  setFullscreenInset(active) {
-    if (!this.buttonEl) return;
-    this.buttonEl.classList.toggle('fs-inset', Boolean(active));
   }
 
   /**
