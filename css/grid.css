@@ -71,6 +71,39 @@
   padding: 4px;
 }
 
+/* Reserved-corner indicators -- one per corner widget, always present in
+   .fd-corner-overlay (positioned via inline grid-column/grid-row from
+   FlightDeckApp.mountCornerWidgets(), matching each corner's full reserved
+   footprint including the margin columns the visible button/badge doesn't
+   cover, see getCornerWidgetLayouts()) but invisible outside edit mode.
+   Toggled by the same .edit-mode-active class toggleEditMode() already
+   applies to the real page grid, so it reacts instantly without needing a
+   re-render. Uses --text-dim (a muted/disabled cue) rather than the cyan
+   grid-guide color above, since this means "off-limits", not "here's the
+   grid" -- and a dashed border/hatch rather than a solid fill, so it still
+   reads as a grid cell, just a blocked one. Sits behind the actual corner
+   widget in DOM order (appended first in mountCornerWidgets()), so it's
+   only visible in the margin columns not already covered by the opaque
+   button/badge. */
+.fd-reserved-corner-indicator {
+  opacity: 0;
+  pointer-events: none;
+  border-radius: 6px;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(140, 150, 172, 0.35) 0px,
+    rgba(140, 150, 172, 0.35) 4px,
+    transparent 4px,
+    transparent 9px
+  );
+  border: 1px dashed rgba(140, 150, 172, 0.65);
+  transition: opacity 0.2s ease;
+}
+
+.fd-corner-overlay.edit-mode-active .fd-reserved-corner-indicator {
+  opacity: 1;
+}
+
 /* Edit Mode Top Toolbar — takes #app's header (.top-bar) flex slot instead
    of floating over the grid, so it needs no reserved padding/overlap math:
    it's normal document flow, not position:fixed. See EditToolbar.js. */

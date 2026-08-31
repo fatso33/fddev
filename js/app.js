@@ -66,6 +66,7 @@ export class FlightDeckApp {
     this.cornerWidgetInstances = [];
     this.menuToggleWidget = null;
     this.appProfileWidget = null;
+    this.cornerOverlayEl = null;
     this.editToolbarVisible = true;
 
     this.contentArea = document.getElementById('content-area');
@@ -499,6 +500,7 @@ export class FlightDeckApp {
     this.cornerWidgetInstances = [];
     this.menuToggleWidget = null;
     this.appProfileWidget = null;
+    this.cornerOverlayEl = null;
 
     // Clean up settings view if previously mounted
     if (this.settingsView) {
@@ -776,8 +778,27 @@ export class FlightDeckApp {
     overlay.className = 'fd-corner-overlay';
     this.layoutEngine.applyGridToContainer(overlay, gridSpec);
     this.contentArea.appendChild(overlay);
+    this.cornerOverlayEl = overlay;
+    // Reacts to toggleEditMode() toggling this same class -- set here too
+    // so it starts correct if a page is (re)rendered while already editing.
+    overlay.classList.toggle('edit-mode-active', this.isEditMode);
 
     const { menu, profile } = this.getCornerWidgetLayouts(orientation, deviceTier, gridSpec);
+
+    // Hatched "reserved" indicators for the two corners' full grid
+    // footprint (including the margin columns not covered by the visible
+    // button/badge, see getCornerWidgetLayouts()) -- invisible outside edit
+    // mode (see .fd-reserved-corner-indicator, grid.css), so a user editing
+    // the page can see that gap isn't actually free space, without cluttering
+    // the normal view. Appended before the widgets mount so they paint
+    // underneath (harmless where the opaque button/badge already covers it).
+    [menu, profile].forEach((entry) => {
+      const indicator = document.createElement('div');
+      indicator.className = 'fd-reserved-corner-indicator';
+      indicator.style.gridColumn = `${entry.layout.col} / span ${entry.layout.w}`;
+      indicator.style.gridRow = `${entry.layout.row} / span ${entry.layout.h}`;
+      overlay.appendChild(indicator);
+    });
 
     const menuInstance = WidgetRegistry.createWidget(menu, this.eventBus);
     menuInstance.mount(overlay);
@@ -898,6 +919,7 @@ export class FlightDeckApp {
     if (this.gridContainer) {
       this.gridContainer.classList.toggle('edit-mode-active', active);
     }
+    this.cornerOverlayEl?.classList.toggle('edit-mode-active', active);
 
     this.activeWidgetInstances.forEach((w) => {
       w.setEditMode(active);
