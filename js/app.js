@@ -219,6 +219,12 @@ export class FlightDeckApp {
       onEnter: () => this.showToast('Fullscreen on — use the Fullscreen toggle in the menu to show the status bar again.')
     });
     this.fullscreen.bindToggle(document.getElementById('fullscreen-toggle-checkbox'));
+
+    // One-time listener (not inside wireCornerInteractions(), which reruns
+    // every render) -- fullscreen can be entered/exited without a render
+    // happening at all, and the corner widgets need to react either way.
+    // See updateFullscreenInset().
+    document.addEventListener('fullscreenchange', () => this.updateFullscreenInset());
   }
 
   initUIComponents() {
@@ -440,6 +446,21 @@ export class FlightDeckApp {
     });
   }
 
+  /**
+   * Pushes the current real Fullscreen API state onto both corner widgets
+   * as a JS-toggled class (see MenuToggleWidget/AppProfileWidget's
+   * setFullscreenInset() for why this can't just be a CSS :fullscreen
+   * selector). Called both from mountCornerWidgets() -- since the corner
+   * widgets are destroyed/recreated every render and would otherwise lose
+   * the class -- and from a one-time 'fullscreenchange' listener (see
+   * initHeaderControls()), since fullscreen can toggle without a render
+   * happening at all.
+   */
+  updateFullscreenInset() {
+    const active = Boolean(document.fullscreenElement);
+    this.menuToggleWidget?.setFullscreenInset(active);
+    this.appProfileWidget?.setFullscreenInset(active);
+  }
 
   showToast(message) {
     let toast = document.getElementById('fd-global-toast');
@@ -646,50 +667,20 @@ export class FlightDeckApp {
   getCornerWidgetLayouts(orientation, deviceTier, gridSpec) {
     const declaredForCols = orientation === 'landscape' ? 44 : 20;
     const scale = (declaredW) => Math.max(1, Math.min(gridSpec.columns, Math.round((declaredW / declaredForCols) * gridSpec.columns)));
-    // Each widget's grid footprint is 2 columns wider than its visible
-    // button/badge (3->5 for the menu, 5->7 for the App Profile badge) --
-    // permanent, always-reserved padding toward the true screen edge, not
-    // conditional on Fullscreen mode. Earlier attempts tried to only pad
-    // when Fullscreen was actually on (first via a :fullscreen CSS
-    // selector, which can't cross this widget's Shadow DOM boundary at
-    // all; then via a JS-toggled class, which worked but needed a curved-
-    // corner cushion size that turned out to vary per device -- correct on
-    // a Pixel 7 Pro, still clipped on a Pixel 10). A static grid-space
-    // margin sidesteps needing to know the device's curvature at all: it's
-    // never enough to be *wrong*, just occasionally more generous than a
-    // given phone strictly needs. visibleCols/totalCols/gap are passed
-    // into each widget's config so it can inner-align its actual button/
-    // badge within the wider cell via its own nested CSS Grid (matching
-    // this outer grid's column-width math exactly) rather than stretching
-    // to fill it -- see MenuToggleWidget/AppProfileWidget.render().
-    const menuVisibleW = scale(3);
-    const menuTotalW = scale(5);
-    const profileVisibleW = scale(5);
-    const profileTotalW = scale(7);
+    const menuW = scale(3);
+    const profileW = scale(5);
     return {
       menu: {
         id: '__corner_menu__',
         type: 'MenuToggleWidget',
-        layout: { col: 1, row: 1, w: menuTotalW, h: 2 },
-        config: {
-          removable: false,
-          appEditMode: this.isEditMode,
-          visibleCols: menuVisibleW,
-          totalCols: menuTotalW,
-          gap: gridSpec.gap
-        }
+        layout: { col: 1, row: 1, w: menuW, h: 2 },
+        config: { removable: false, appEditMode: this.isEditMode }
       },
       profile: {
         id: '__corner_profile__',
         type: 'AppProfileWidget',
-        layout: { col: Math.max(1, gridSpec.columns - profileTotalW + 1), row: 1, w: profileTotalW, h: 2 },
-        config: {
-          removable: false,
-          label: this.activeProfile ? this.activeProfile.name.toUpperCase().slice(0, 7) : 'DEFAULT',
-          visibleCols: profileVisibleW,
-          totalCols: profileTotalW,
-          gap: gridSpec.gap
-        }
+        layout: { col: Math.max(1, gridSpec.columns - profileW + 1), row: 1, w: profileW, h: 2 },
+        config: { removable: false, label: this.activeProfile ? this.activeProfile.name.toUpperCase().slice(0, 7) : 'DEFAULT' }
       }
     };
   }
@@ -793,6 +784,7 @@ export class FlightDeckApp {
     this.appProfileWidget = profileInstance;
 
     this.updateMenuButtonStatus();
+    this.updateFullscreenInset();
     this.wireCornerInteractions();
   }
 

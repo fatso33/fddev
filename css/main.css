@@ -194,6 +194,32 @@ body {
   color: var(--accent-magenta);
 }
 
+/* Fullscreen mode (FullscreenManager.js -- requestFullscreen() on <html>)
+   hides the status bar, so these two corner widgets end up flush against
+   the device's true top-left/top-right screen edges. On curved-corner
+   phones the arc crops into the button/badge visually (env(safe-area-
+   inset-*) isn't reliably populated for corner rounding the way it is for
+   notches, so it can't be trusted alone here -- combined with a fixed
+   cushion instead). Only the button/badge's own inner padding shifts; the
+   widget's grid cell -- and therefore the reserved-corner collision math
+   in app.js -- is untouched, so this costs nothing in the row-1 space
+   between the two corners.
+   `.fs-inset` rather than a `:fullscreen` selector -- this button/badge
+   render inside a real Shadow DOM (BaseWidget's adoptedStyleSheets), and a
+   stylesheet adopted into a shadow root can only match ancestors within
+   that same shadow tree; <html>, where :fullscreen actually lives, is
+   outside it, so `:fullscreen .garmin-menu-btn` silently never matches.
+   FlightDeckApp toggles this class via document.fullscreenElement /
+   'fullscreenchange' instead -- see MenuToggleWidget/AppProfileWidget's
+   setFullscreenInset(). */
+.garmin-menu-btn.fs-inset {
+  padding-left: calc(16px + max(14px, env(safe-area-inset-left, 0px)));
+}
+
+.aircraft-badge.fs-inset {
+  padding-right: calc(12px + max(14px, env(safe-area-inset-right, 0px)));
+}
+
 /* Dropdown Menu Drawer — a static child of the zero-height .top-bar
    (position:relative), so it's positioned relative to #app's top edge. Its
    trigger, the menu corner widget, floats above the page grid's row 1-2
