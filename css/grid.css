@@ -60,12 +60,31 @@
   z-index: 5;
 }
 
-/* Edit Mode Grid Guides Overlay */
+/* Edit Mode Grid Guides Overlay
+   Two bugs in the old version of this rule made the dot grid visibly drift
+   away from the actual widget grid the more columns/rows a page had:
+   1. background-size used `100% / cols` and plain `row-height` for its
+      tile size, silently assuming zero gap between tracks -- real CSS Grid
+      columns/rows are `(container - (n-1)*gap) / n`, so every tile after
+      the first was already off, and the error compounded every column/row.
+   2. background-origin defaults to padding-box, but this element has a
+      4px padding and its real grid *items* live in the content box (inset
+      by that padding) -- a fixed 4px origin mismatch on top of the above.
+   Fixed by working the gap into the tile-size calc() for both axes
+   (row-height's fix is exact, pure px math; the column fix is correct on
+   average but can be off by a device-pixel or so on some tracks, since
+   1fr division doesn't always split leftover space perfectly evenly --
+   imperceptible in practice) and setting background-origin: content-box
+   so the pattern's own origin lines up with where grid items actually
+   start. */
 .fd-page-grid.edit-mode-active {
   background-image:
     linear-gradient(to right, rgba(0, 216, 246, 0.08) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(0, 216, 246, 0.08) 1px, transparent 1px);
-  background-size: calc(100% / var(--grid-cols, 20)) var(--row-height, 16px);
+  background-origin: content-box;
+  background-size:
+    calc((100% - (var(--grid-cols, 20) - 1) * var(--grid-gap, 8px)) / var(--grid-cols, 20) + var(--grid-gap, 8px))
+    calc(var(--row-height, 16px) + var(--grid-gap, 8px));
   border: 1px dashed rgba(0, 216, 246, 0.4);
   border-radius: 8px;
   padding: 4px;
