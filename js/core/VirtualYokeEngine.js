@@ -34,11 +34,10 @@ export class VirtualYokeEngine {
   // under 0.1°, so a smaller range only means more axis counts per degree
   // of real rotation, not coarser control.
   //
-  // User-adjustable from the Settings page (Virtual Yoke Sensitivity card);
-  // these are just the factory defaults and the "Reset to Default" targets.
-  // ROLL_SENSITIVITY_DEG=35 was the original, shared value for both axes.
-  static DEFAULT_PITCH_SENSITIVITY_DEG = 20;
-  static DEFAULT_ROLL_SENSITIVITY_DEG = 35;
+  // User-adjustable from the Settings page (Virtual Yoke card); these are
+  // just the factory defaults and the "Reset to Default" targets.
+  static DEFAULT_PITCH_SENSITIVITY_DEG = 30;
+  static DEFAULT_ROLL_SENSITIVITY_DEG = 70;
 
   // Sane bounds for the Settings page's inputs — below MIN the response
   // gets uncontrollably twitchy, above MAX a full-range tilt stops being
