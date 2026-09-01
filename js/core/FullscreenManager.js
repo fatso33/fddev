@@ -33,11 +33,15 @@ export class FullscreenManager {
     this._resumeArmed = false;
 
     if (this.supported) {
-      // Keep the checkbox in sync if fullscreen was exited some way other
-      // than our own toggle (Android back gesture, browser Escape, etc.).
+      // Keep the checkbox in sync with the REAL fullscreen state, however it
+      // changed (our own toggle, the resume-on-next-gesture path below, an
+      // Android back gesture, browser Escape, etc.) -- this is the only
+      // place that ever marks the checkbox checked, specifically so it can
+      // never show "on" before the browser has actually entered fullscreen
+      // (see bindToggle()'s comment for the bug this fixes).
       document.addEventListener('fullscreenchange', () => {
-        if (!document.fullscreenElement && this._checkbox) {
-          this._checkbox.checked = false;
+        if (this._checkbox) {
+          this._checkbox.checked = Boolean(document.fullscreenElement);
         }
       });
 
@@ -98,7 +102,14 @@ export class FullscreenManager {
   bindToggle(checkbox) {
     if (!checkbox) return;
     this._checkbox = checkbox;
-    checkbox.checked = this.enabled;
+    // Reflects the ACTUAL fullscreen state (always false at this point --
+    // see the class doc comment: browsers never resume fullscreen on their
+    // own on load/reload), not this.enabled's merely-persisted intent. The
+    // fullscreenchange listener above is what flips this to checked once
+    // _armResumeOnNextGesture() (or the checkbox itself) actually succeeds
+    // in re-entering fullscreen -- previously this showed "on" the instant
+    // the menu was opened even though the page wasn't fullscreen yet.
+    checkbox.checked = Boolean(document.fullscreenElement);
     checkbox.disabled = !this.supported;
     if (!this.supported) {
       checkbox.title = 'Fullscreen is not supported in this browser';

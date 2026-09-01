@@ -129,6 +129,12 @@ export class FlightDeckApp {
   }
 
   handleOrientationChange(newOrientation, isResize = false) {
+    const currentWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    const currentHeight = typeof window !== 'undefined' ? window.innerHeight : 768;
+    const newDeviceTier = LayoutEngine.getDeviceTier(currentWidth, currentHeight);
+    const orientationActuallyChanged = newOrientation !== this.currentOrientation;
+    const tierActuallyChanged = newDeviceTier !== this.currentDeviceTier;
+
     this.currentOrientation = newOrientation;
     if (this.editToolbar) {
       this.editToolbar.setOrientation(newOrientation);
@@ -138,7 +144,60 @@ export class FlightDeckApp {
       return;
     }
 
+    // The watcher's own >5px threshold (see LayoutEngine.initOrientationWatcher)
+    // fires this for ANY resize, not just a real portrait<->landscape flip --
+    // including the on-screen keyboard opening/closing and the Fullscreen API's
+    // status-bar hide/show transition, both of which change window.innerHeight
+    // well past that threshold. renderActivePage() destroys and rebuilds every
+    // widget instance from scratch, which (a) yanks focus off whatever's
+    // focused -- e.g. dismissing the keyboard the instant it opens, since the
+    // <input> it was anchored to gets torn down and recreated -- and (b) can
+    // fire twice in quick succession across a resize's debounced re-check
+    // (line ~140 in LayoutEngine), painting the grid at two different
+    // transient sizes and producing a visible flash/jump. Neither the
+    // orientation nor the device tier actually changed here, so nothing about
+    // WHICH widgets/grid-spec apply is different -- only the pixel geometry
+    // is. Refresh that in place instead of tearing anything down.
+    if (!orientationActuallyChanged && !tierActuallyChanged) {
+      this.currentDeviceTier = newDeviceTier;
+      this.refreshGridGeometry(newOrientation, newDeviceTier);
+      return;
+    }
+
     this.renderActivePage();
+  }
+
+  /**
+   * Lightweight counterpart to renderActivePage() for a resize that didn't
+   * actually change orientation or device tier (soft keyboard, fullscreen
+   * transition, browser chrome show/hide, ...). Re-measures column width and
+   * re-applies the resulting grid CSS custom properties to whichever
+   * containers are currently mounted, then asks every already-mounted widget
+   * instance to re-read them via its own applyLayoutStyles() -- same method
+   * BaseWidget already exposes for in-place layout updates (see
+   * updateLayout()) -- without destroying or recreating a single instance,
+   * so focus/keyboard state and any in-progress edit survive untouched.
+   */
+  refreshGridGeometry(orientation, deviceTier) {
+    if (this.cornerOverlayEl) {
+      const page = this.activePageId === 'page_settings' ? null : this.activeProfile.getPage(this.activePageId);
+      const gridSpecForCorners = { ...((page && page.getGrid(orientation, deviceTier)) || LayoutEngine.getGridSpec(orientation, deviceTier)) };
+      const liveCornerColWidth = this.layoutEngine.measureColumnWidth(this.cornerOverlayEl, gridSpecForCorners);
+      if (liveCornerColWidth) gridSpecForCorners.rowHeight = liveCornerColWidth;
+      this.layoutEngine.applyGridToContainer(this.cornerOverlayEl, gridSpecForCorners);
+      this.cornerWidgetInstances.forEach((w) => w.applyLayoutStyles());
+    }
+
+    if (this.gridContainer) {
+      const page = this.activePageId === 'page_settings' ? null : this.activeProfile.getPage(this.activePageId);
+      if (page) {
+        const gridSpec = { ...(page.getGrid(orientation, deviceTier) || LayoutEngine.getGridSpec(orientation, deviceTier)) };
+        const liveColWidth = this.layoutEngine.measureColumnWidth(this.gridContainer, gridSpec);
+        if (liveColWidth) gridSpec.rowHeight = liveColWidth;
+        this.layoutEngine.applyGridToContainer(this.gridContainer, gridSpec);
+        this.activeWidgetInstances.forEach((w) => w.applyLayoutStyles());
+      }
+    }
   }
 
   initHeaderControls() {
