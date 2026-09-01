@@ -256,6 +256,12 @@
   border-color: var(--accent-cyan);
 }
 
+.settings-btn-secondary.active {
+  background: var(--accent-cyan, #00e5ff);
+  border-color: var(--accent-cyan, #00e5ff);
+  color: #090d14;
+}
+
 .settings-btn-secondary.spinning svg {
   animation: spin 1s infinite linear;
 }

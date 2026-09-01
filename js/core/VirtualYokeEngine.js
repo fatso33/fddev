@@ -55,14 +55,28 @@ export class VirtualYokeEngine {
   // no throttling of its own; see docs/Virtual-Yoke-Page.md).
   static DEAD_BAND = 40;
 
-  // Fraction of each axis's *_SENSITIVITY_DEG (0..1) beyond which the
-  // response curve eases off instead of staying linear — see
-  // _applyResponseCurve(). Below
-  // this, output is exactly proportional to tilt; a physical wrist's last
-  // few degrees of rotation near a range's limit are hard to control
-  // precisely, so without this the final approach to full deflection tends
-  // to feel like it snaps/rushes to the limit.
-  static RESPONSE_KNEE = 0.75;
+  // 'freehand' (default — held in the hand, no mechanical centering) or
+  // 'mounted' (phone seated in a self-centering rig, e.g. a 3D-printed
+  // yoke mount) — picks which EXPO_K_* below _applyResponseCurve() uses.
+  // User-selectable from the Settings page (Virtual Yoke card); see
+  // setMountMode().
+  static MOUNT_MODE_FREEHAND = 'freehand';
+  static MOUNT_MODE_MOUNTED = 'mounted';
+  static MOUNT_MODE_STORAGE_KEY = 'flightdeck_yoke_mount_mode';
+
+  // Classic RC-transmitter expo coefficient: y = k*x^3 + (1-k)*x, x/y in
+  // -1..1, k in 0..1 (k=0 is linear). Freehand needs real softening near
+  // center — bare-hand tilt has no spring return, so ordinary hand tremor
+  // would otherwise ride straight through as control input — hence a
+  // pronounced k. A mounted rig's own spring centering already does that
+  // job mechanically, so its k is just a light touch, not a replacement for
+  // one; a rig with a genuine hard end-stop could reasonably run k=0
+  // (fully linear) instead, since the physical stop itself is what makes a
+  // real yoke's last few degrees controllable, not a software curve — see
+  // docs/Virtual-Yoke-Page.md's Response curve section for the fuller
+  // reasoning and the plotted comparison this was chosen from.
+  static EXPO_K_FREEHAND = 0.5;
+  static EXPO_K_MOUNTED = 0.15;
 
   constructor(eventBus) {
     this.eventBus = eventBus;
@@ -88,6 +102,7 @@ export class VirtualYokeEngine {
     this.rollSensitivityDeg = VirtualYokeEngine._loadSensitivity(
       VirtualYokeEngine.ROLL_STORAGE_KEY, VirtualYokeEngine.DEFAULT_ROLL_SENSITIVITY_DEG
     );
+    this.mountMode = VirtualYokeEngine._loadMountMode();
 
     // Current commanded deflection, normalized to -1..1 per axis (shaped by
     // the response curve, same value the axis dispatch is derived from) —
@@ -283,8 +298,11 @@ export class VirtualYokeEngine {
     const pitchDeg = pitchSign * euler.gamma;
     const rollDeg = euler.alpha;
 
-    this.pitchNorm = VirtualYokeEngine._toNorm(pitchDeg, this.pitchSensitivityDeg);
-    this.rollNorm = VirtualYokeEngine._toNorm(rollDeg, this.rollSensitivityDeg);
+    const expoK = this.mountMode === VirtualYokeEngine.MOUNT_MODE_MOUNTED
+      ? VirtualYokeEngine.EXPO_K_MOUNTED
+      : VirtualYokeEngine.EXPO_K_FREEHAND;
+    this.pitchNorm = VirtualYokeEngine._toNorm(pitchDeg, this.pitchSensitivityDeg, expoK);
+    this.rollNorm = VirtualYokeEngine._toNorm(rollDeg, this.rollSensitivityDeg, expoK);
     this._emitDeflection();
 
     this._pendingPitch = Math.round(this.pitchNorm * VirtualYokeEngine.AXIS_MAX);
@@ -321,35 +339,30 @@ export class VirtualYokeEngine {
    * axis value and the Yoke Deflection Indicator widget are derived from.
    * @param {number} deltaDeg physical tilt in degrees, relative to reference
    * @param {number} sensitivityDeg degrees of tilt that map to full deflection for this axis
+   * @param {number} expoK see _applyResponseCurve()
    * @returns {number} -1..1
    */
-  static _toNorm(deltaDeg, sensitivityDeg) {
+  static _toNorm(deltaDeg, sensitivityDeg, expoK) {
     const clamped = Math.max(-sensitivityDeg, Math.min(sensitivityDeg, deltaDeg));
     const norm = clamped / sensitivityDeg; // -1 .. 1, linear
-    return VirtualYokeEngine._applyResponseCurve(norm);
+    return VirtualYokeEngine._applyResponseCurve(norm, expoK);
   }
 
   /**
-   * Leaves |norm| unchanged below RESPONSE_KNEE (linear, as measured — this
-   * is the range users report already "turns linearly and feels good").
-   * Above the knee, eases the remainder of the 0..1 range through a cubic
-   * Hermite curve with slope 1 where it joins the linear region (no visible
-   * kink) and slope 0 at the true limit (norm = ±1) — i.e. the last portion
-   * of physical tilt maps to a *decreasing* rate of output change instead
-   * of racing linearly to full deflection right up to the limit.
+   * Classic RC-transmitter expo curve: y = k*x^3 + (1-k)*x. k=0 is exactly
+   * linear; increasing k softens the slope near center (where an unaided
+   * hand's own tremor/imprecision is worst, without a real yoke's spring
+   * return to damp it) while the curve still passes through exactly (±1,
+   * ±1), so full physical tilt always reaches full deflection regardless of
+   * k. See docs/Virtual-Yoke-Page.md's Response curve section for the
+   * reasoning behind EXPO_K_FREEHAND vs EXPO_K_MOUNTED specifically, and
+   * why this replaced the previous knee-based ease-near-the-limit curve.
    * @param {number} norm -1..1
+   * @param {number} k 0..1
    * @returns {number} -1..1
    */
-  static _applyResponseCurve(norm) {
-    const knee = VirtualYokeEngine.RESPONSE_KNEE;
-    const mag = Math.abs(norm);
-    if (mag <= knee) return norm;
-
-    const span = 1 - knee;
-    const x = Math.min(1, (mag - knee) / span); // 0..1 within the knee region
-    const eased = -x * x * x + x * x + x; // f(0)=0, f'(0)=1, f(1)=1, f'(1)=0
-    const remapped = knee + eased * span;
-    return Math.sign(norm) * Math.min(1, remapped);
+  static _applyResponseCurve(norm, k) {
+    return k * norm * norm * norm + (1 - k) * norm;
   }
 
   _flush() {
@@ -474,7 +487,8 @@ export class VirtualYokeEngine {
       hasReference: this.hasReference,
       permissionState: this.permissionState,
       pitchSensitivityDeg: this.pitchSensitivityDeg,
-      rollSensitivityDeg: this.rollSensitivityDeg
+      rollSensitivityDeg: this.rollSensitivityDeg,
+      mountMode: this.mountMode
     };
   }
 
@@ -517,6 +531,47 @@ export class VirtualYokeEngine {
     this.rollSensitivityDeg = VirtualYokeEngine._clampSensitivity(deg, VirtualYokeEngine.DEFAULT_ROLL_SENSITIVITY_DEG);
     VirtualYokeEngine._saveSensitivity(VirtualYokeEngine.ROLL_STORAGE_KEY, this.rollSensitivityDeg);
     this._emitState();
+  }
+
+  /**
+   * Sets and persists whether the phone is being held freehand or seated in
+   * a self-centering mount ("Virtual Yoke" card, Settings page) — picks
+   * EXPO_K_FREEHAND vs EXPO_K_MOUNTED in _applyResponseCurve(). Invalid
+   * input falls back to MOUNT_MODE_FREEHAND. Takes effect on the very next
+   * orientation sample.
+   * @param {string} mode MOUNT_MODE_FREEHAND | MOUNT_MODE_MOUNTED
+   */
+  setMountMode(mode) {
+    this.mountMode = mode === VirtualYokeEngine.MOUNT_MODE_MOUNTED
+      ? VirtualYokeEngine.MOUNT_MODE_MOUNTED
+      : VirtualYokeEngine.MOUNT_MODE_FREEHAND;
+    VirtualYokeEngine._saveMountMode(this.mountMode);
+    this._emitState();
+  }
+
+  /**
+   * @returns {string} MOUNT_MODE_FREEHAND | MOUNT_MODE_MOUNTED
+   */
+  static _loadMountMode() {
+    if (typeof localStorage === 'undefined') return VirtualYokeEngine.MOUNT_MODE_FREEHAND;
+    try {
+      const raw = localStorage.getItem(VirtualYokeEngine.MOUNT_MODE_STORAGE_KEY);
+      return raw === VirtualYokeEngine.MOUNT_MODE_MOUNTED
+        ? VirtualYokeEngine.MOUNT_MODE_MOUNTED
+        : VirtualYokeEngine.MOUNT_MODE_FREEHAND;
+    } catch (_) {
+      return VirtualYokeEngine.MOUNT_MODE_FREEHAND;
+    }
+  }
+
+  /**
+   * @param {string} mode
+   */
+  static _saveMountMode(mode) {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(VirtualYokeEngine.MOUNT_MODE_STORAGE_KEY, mode);
+    } catch (_) {}
   }
 
   /**

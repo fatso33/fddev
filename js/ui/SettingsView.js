@@ -256,10 +256,19 @@ export class SettingsView {
               </svg>
             </div>
             <div>
-              <h2 class="settings-card-title">Virtual Yoke Sensitivity</h2>
-              <p class="settings-card-desc">Degrees of phone tilt (from center) that reach full control deflection</p>
+              <h2 class="settings-card-title">Virtual Yoke</h2>
+              <p class="settings-card-desc">Mount type and degrees of phone tilt (from center) that reach full control deflection</p>
             </div>
           </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label">Mount type</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="btn-yoke-mode-freehand" class="settings-btn-secondary${(!this.virtualYoke || this.virtualYoke.mountMode !== VirtualYokeEngine.MOUNT_MODE_MOUNTED) ? ' active' : ''}">Freehand</button>
+            <button id="btn-yoke-mode-mounted" class="settings-btn-secondary${(this.virtualYoke && this.virtualYoke.mountMode === VirtualYokeEngine.MOUNT_MODE_MOUNTED) ? ' active' : ''}">Mounted rig</button>
+          </div>
+          <p class="settings-hint">Freehand (default): held in the hand, no mechanical centering — the response curve softens near center on its own to damp ordinary hand tremor. Mounted rig: phone seated in a self-centering mount (e.g. a 3D-printed yoke rig) — the mount's own spring already does that job, so the curve only needs a light touch.</p>
         </div>
 
         <div class="settings-section">
@@ -811,6 +820,18 @@ export class SettingsView {
         this.refreshStatsDisplay();
       });
     }
+
+    // Virtual Yoke Mount Type
+    const freehandBtn = this.container.querySelector('#btn-yoke-mode-freehand');
+    const mountedBtn = this.container.querySelector('#btn-yoke-mode-mounted');
+    const setMountMode = (mode) => {
+      if (!this.virtualYoke) return;
+      this.virtualYoke.setMountMode(mode);
+      if (freehandBtn) freehandBtn.classList.toggle('active', mode !== VirtualYokeEngine.MOUNT_MODE_MOUNTED);
+      if (mountedBtn) mountedBtn.classList.toggle('active', mode === VirtualYokeEngine.MOUNT_MODE_MOUNTED);
+    };
+    if (freehandBtn) freehandBtn.addEventListener('click', () => setMountMode(VirtualYokeEngine.MOUNT_MODE_FREEHAND));
+    if (mountedBtn) mountedBtn.addEventListener('click', () => setMountMode(VirtualYokeEngine.MOUNT_MODE_MOUNTED));
 
     // Virtual Yoke Sensitivity
     const pitchInput = this.container.querySelector('#input-yoke-pitch-sensitivity');
