@@ -547,12 +547,20 @@ export class SimBridge {
    * of how much higher it is. Defaults to `1` (normal/legacy 1Hz tier) —
    * only widgets that actually need fast updates (e.g. an attitude
    * indicator's pitch/bank) should pass a higher value.
+   * FDWS v1.26 §1: `groupKey` (from `binding.pollGroup` / `state[].pollGroup`,
+   * defaulting to the subscribing widget's own definition id if the author
+   * left it blank — see BaseWidget.js/CompositeWidget.js) picks which
+   * SimConnect chunk this var's data definition joins on the bridge, so a
+   * widget's own vars land together in one chunk instead of being
+   * interleaved with unrelated widgets' vars purely by subscribe-order
+   * timing. Only meaningful the first time PC Bridge sees this simVar.
    * @param {string} simVar
    * @param {string} unit
    * @param {number} deadband
    * @param {number} pollFrequencyHz
+   * @param {string} [groupKey]
    */
-  subscribeSimVar(simVar, unit = 'Number', deadband = 0, pollFrequencyHz = 1) {
+  subscribeSimVar(simVar, unit = 'Number', deadband = 0, pollFrequencyHz = 1, groupKey) {
     const cleanVar = SecurityValidator.sanitizeSimVar(simVar);
     if (!cleanVar) return;
 
@@ -561,6 +569,7 @@ export class SimBridge {
       simVar: cleanVar,
       unit: unit || 'Number',
       pollFrequencyHz: Number(pollFrequencyHz) || 1,
+      pollGroup: groupKey || undefined,
       deadband: Number(deadband) || 0
     });
   }

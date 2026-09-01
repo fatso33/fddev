@@ -105,9 +105,16 @@ export class EventBus {
    *   current listeners either way, so a reconnect resync
    *   (`getActiveSchemaManifest()`) always requests the fastest tier any
    *   current listener needs, even after listeners have come and gone.
+   * @param {string} [groupKey] - FDWS v1.26 §1: which PC Bridge polling
+   *   chunk this SimVar should join — see `SimBridge.subscribeSimVar()`'s
+   *   doc comment. Only the *first* subscriber's groupKey is ever sent
+   *   (recorded once on `entry.groupKey`, same "first subscriber wins"
+   *   rule the polling-investigation discussion settled on) — a later
+   *   subscriber's groupKey is ignored, since PC Bridge already placed the
+   *   var by the time a second widget references it.
    * @returns {Function} Unsubscribe function
    */
-  subscribeSimVar(simVarName, unit = 'Number', callback, deadband = 0, pollFrequencyHz = 1) {
+  subscribeSimVar(simVarName, unit = 'Number', callback, deadband = 0, pollFrequencyHz = 1, groupKey) {
     const cleanVar = SecurityValidator.sanitizeSimVar(simVarName) || simVarName;
     const isNew = !this.simVarSubscriptions.has(cleanVar);
     if (isNew) {
@@ -115,6 +122,7 @@ export class EventBus {
         refCount: 0,
         unit: unit || 'Number',
         pollFrequencyHz: 1,
+        groupKey: groupKey || undefined,
         listeners: new Map()
       });
     }
@@ -130,7 +138,7 @@ export class EventBus {
     // updates but mounts *after* a normal-tier one already subscribed the
     // same simVar would silently never get promoted.
     if ((isNew || isPromotion) && this.bridgeClient) {
-      this.bridgeClient.subscribeSimVar(cleanVar, unit, deadband, entry.pollFrequencyHz);
+      this.bridgeClient.subscribeSimVar(cleanVar, unit, deadband, entry.pollFrequencyHz, entry.groupKey);
     }
 
     entry.refCount++;
@@ -306,7 +314,7 @@ export class EventBus {
   getActiveSchemaManifest() {
     const simVars = [];
     this.simVarSubscriptions.forEach((entry, simVar) => {
-      simVars.push({ simVar, unit: entry.unit, pollFrequencyHz: entry.pollFrequencyHz });
+      simVars.push({ simVar, unit: entry.unit, pollFrequencyHz: entry.pollFrequencyHz, pollGroup: entry.groupKey });
     });
 
     const events = [];

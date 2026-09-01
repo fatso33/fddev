@@ -393,7 +393,8 @@ export class CompositeWidget extends BaseWidget {
               this.onComponentTelemetry(comp.id, cleanVar, val);
             },
             binding.deadband || 0,
-            binding.pollFrequencyHz || 1
+            binding.pollFrequencyHz || 1,
+            binding.pollGroup || this.definition.id
           );
           this.unsubscribers.push(unsub);
         }
@@ -441,7 +442,8 @@ export class CompositeWidget extends BaseWidget {
             this.setLocalState(st.name, val, false); // sync without loop
           },
           st.deadband || 0,
-          st.pollFrequencyHz || 1
+          st.pollFrequencyHz || 1,
+          st.pollGroup || this.definition.id
         );
         this.unsubscribers.push(unsub);
       }

@@ -300,7 +300,8 @@ export class BaseWidget {
             this.onTelemetryUpdate(cleanVar, val);
           },
           binding.deadband || 0,
-          binding.pollFrequencyHz || 1
+          binding.pollFrequencyHz || 1,
+          binding.pollGroup || this.type
         );
         this.unsubscribers.push(unsub);
       }
