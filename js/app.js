@@ -319,6 +319,9 @@ export class FlightDeckApp {
     this.propertyInspector = new PropertyInspector({
       eventBus: this.eventBus,
       storageManager: this.storage,
+      // 1.1-C: the bindings list resolves, probes and fires against the live
+      // bridge, so the inspector needs the same connection ProfileSelector has.
+      simBridge: this.simBridge,
       onSaveConfig: (widgetId, partial) => this.handleUpdateWidgetConfig(widgetId, partial, this.currentOrientation),
       onRemoveWidget: (widgetId) => this.removeWidgetFromPage(widgetId, this.currentOrientation),
       onConfigureButton: (widgetId) => this.openButtonConfigPopover(widgetId, 'edit')

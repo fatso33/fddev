@@ -15,14 +15,18 @@ import {
   setBindingControlValue,
   getBindingControlValue
 } from './DeckEventBindingField.js';
+import { BindingsList } from './BindingsList.js';
 
 export class PropertyInspector {
-  constructor({ onSaveConfig, onRemoveWidget, onConfigureButton, eventBus, storageManager }) {
+  constructor({ onSaveConfig, onRemoveWidget, onConfigureButton, eventBus, storageManager, simBridge }) {
     this.onSaveConfig = onSaveConfig;
     this.onRemoveWidget = onRemoveWidget;
     this.onConfigureButton = onConfigureButton;
     this.eventBus = eventBus;
     this.storageManager = storageManager;
+    // 1.1-C: composites get a real per-component bindings list where the dead
+    // generic binding fields used to be hidden.
+    this.bindingsList = new BindingsList({ simBridge });
     this.element = null;
     this.activeWidget = null;
     this.activeOrientation = 'portrait';
@@ -146,6 +150,11 @@ export class PropertyInspector {
           </div>
           </div>
 
+          <!-- 1.1-C: per-component bindings for composite widgets. Occupies
+               the slot the generic binding group above is hidden in — the two
+               are mutually exclusive by construction (see inspect()). -->
+          <div id="fd-insp-bindings-list"></div>
+
           </div>
         </div>
 
@@ -211,6 +220,8 @@ export class PropertyInspector {
     populateDefaultSelect(this.element, 'insp', 'simvar', 'read');
     wireBindingControls(this.element, 'insp', 'event');
     wireBindingControls(this.element, 'insp', 'simvar');
+
+    this.bindingsList.mount(this.element.querySelector('#fd-insp-bindings-list'));
   }
 
   async inspect(widget, orientation = 'portrait', tier = 'mobile') {
@@ -283,6 +294,16 @@ export class PropertyInspector {
     const isComposite = WidgetRegistry.definitions.has(widget.type);
     this.element.querySelector('#fd-insp-binding-group')?.classList.toggle('hidden', isComposite);
 
+    // 1.1-C: for a composite, the real bindings live per-component inside
+    // config.definition. List them where the dead generic editor is hidden.
+    // ButtonWidget is excluded on purpose — its whole config, bindings
+    // included, is edited in ButtonConfigPopover, and #fd-insp-generic-config-
+    // group (which contains this list) is hidden for it anyway.
+    const listEl = this.element.querySelector('#fd-insp-bindings-list');
+    const showList = isComposite && !isConfigurableButton;
+    const hasRows = showList ? this.bindingsList.load(widget.config?.definition) : this.bindingsList.load(null);
+    if (listEl) listEl.classList.toggle('hidden', !showList || !hasRows);
+
     this.open();
   }
 
@@ -345,11 +366,18 @@ export class PropertyInspector {
     // per-component one) already wrote to config.definition.
     const isComposite = WidgetRegistry.definitions.has(this.activeWidget.type);
 
+    // 1.1-C: a composite's real bindings were edited in the list above, which
+    // staged them on a working copy. `null` means untouched — leave the
+    // existing definition strictly alone rather than writing back a clone,
+    // so Cancel and an unedited Apply both genuinely change nothing.
+    const editedDefinition = isComposite ? this.bindingsList.getDefinition() : null;
+
     const newConfig = {
       ...this.activeWidget.config,
       label: cleanLabel || this.activeWidget.config.label || 'WIDGET',
       shortLabel: cleanLabel || this.activeWidget.config.shortLabel || undefined,
       respondToSimEvents: this.tempRespondToSim,
+      ...(editedDefinition ? { definition: editedDefinition } : {}),
       ...(isComposite ? {} : {
         writeEvent: sanitizedEvent || undefined,
         binding: {

@@ -962,3 +962,105 @@ input:checked + .slider:before {
   transform: translateX(-50%) translateY(0);
 }
 
+
+/* ── 1.1-C: per-component bindings list (BindingsList.js) ─────────────────
+   Shown in the Property Inspector for composite widgets, where the generic
+   binding fields (dead for composites since they write keys CompositeWidget
+   never reads) are hidden instead. */
+.fd-bl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Deliberately NOT its own scroll container. Giving the list max-height +
+     overflow-y stacked a second touch scroller inside .fd-inspector-body,
+     which already scrolls: dragging on a row scrolled the list, dragging
+     beside it scrolled the modal, and the list's own bottom sat underneath
+     the actions bar so the final row stayed clipped even at scrollTop max.
+     Apply/Cancel live outside the scrolling body, so they stay reachable no
+     matter how long this list gets — one scroller is enough. */
+}
+
+.fd-bl-row {
+  background: var(--card-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fd-bl-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fd-bl-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-label);
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fd-bl-tag {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+.fd-bl-tag-read  { color: var(--accent-cyan); border-color: var(--accent-cyan); }
+.fd-bl-tag-write { color: var(--accent-magenta, #ff5cf4); border-color: var(--accent-magenta, #ff5cf4); }
+.fd-bl-tag-src   { color: var(--text-label); border-color: var(--btn-border); }
+
+.fd-bl-edit {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.fd-bl-edit input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--well-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 5px;
+  color: var(--text-white);
+  padding: 7px 9px;
+  font-family: 'Chakra Petch', monospace;
+  font-size: 13px;
+  outline: none;
+}
+.fd-bl-edit input[type="text"]:focus { border-color: var(--accent-cyan); }
+
+.fd-bl-btn {
+  flex: 0 0 auto;
+  /* 40px: the tap target has to survive a bumpy approach, and this row is
+     the one place in the app that fires an event into a live aircraft. */
+  min-width: 40px;
+  background: var(--btn-bg, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--btn-border);
+  border-radius: 5px;
+  color: var(--text-white);
+  font-size: 14px;
+  cursor: pointer;
+}
+.fd-bl-btn:active { border-color: var(--accent-cyan); }
+
+.fd-bl-resolved {
+  font-family: 'Chakra Petch', monospace;
+  font-size: 11px;
+  color: var(--text-label);
+  word-break: break-word;
+}
+.fd-bl-resolved.fd-bl-warn { color: var(--accent-amber, #ffb454); }
