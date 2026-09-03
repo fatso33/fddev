@@ -388,11 +388,40 @@ export class FlightDeckApp {
       this.updateMenuButtonStatus();
     });
 
-    // Telemetry updates for profile name
-    this.eventBus.subscribe('TELEMETRY_STREAM', (data) => {
-      if (data.profile && this.appProfileWidget) {
-        this.appProfileWidget.setLabel(data.profile.toUpperCase().slice(0, 7));
-      }
+    // 0.2-B(d): active PC Bridge Binding Profile name -- distinct from
+    // this.activeProfile (the App Profile, this PWA's own page-layout
+    // concept, rendered on appProfileWidget elsewhere in this file). Do not
+    // conflate the two on the same badge; this one renders in the nav menu.
+    this.eventBus.subscribe('BINDING_PROFILE_CHANGED', ({ name }) => {
+      const el = document.getElementById('menu-binding-profile-name');
+      if (el) el.textContent = name || '—';
+    });
+
+    // 0.2-B(c): unmapped/auto-discovered bindings across all profiles --
+    // requested once on every connect (SimBridge.js's onopen) since the
+    // one-shot PENDING_MAPPINGS_UPDATED broadcast fires only at widget-install
+    // time, which the phone is almost never connected for.
+    this.eventBus.subscribe('PENDING_MAPPINGS_UPDATED', ({ pending }) => {
+      const row = document.getElementById('menu-binding-pending-row');
+      const countEl = document.getElementById('menu-binding-pending-count');
+      if (!row || !countEl) return;
+      const count = Array.isArray(pending) ? pending.length : 0;
+      countEl.textContent = count;
+      row.classList.toggle('hidden', count === 0);
+    });
+
+    // 0.2-B(a)/(b): binding failures. Both fire in direct response to
+    // something that just happened (a button press, or an actively-broken
+    // read binding) -- a transient toast matches this app's existing
+    // showToast() pattern for that kind of feedback, same as every other
+    // showToast() call site in this file. Diagnostic-only for now: fixing a
+    // binding still means opening PC Bridge on the PC (per-component editing
+    // on the phone itself is 1.1's job).
+    this.eventBus.subscribe('SIM_EVENT_DISPATCH_FAILED', ({ event, reason }) => {
+      this.showToast(`"${event}" didn't fire — ${reason || 'check its mapping in PC Bridge.'}`);
+    });
+    this.eventBus.subscribe('SIMVAR_BINDING_ERROR', ({ logicalName, simVar }) => {
+      this.showToast(`"${logicalName || simVar}" is misconfigured — check its unit/name in PC Bridge (Aircraft Profile settings).`);
     });
 
     // Inspector open trigger

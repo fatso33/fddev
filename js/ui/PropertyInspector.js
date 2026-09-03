@@ -115,6 +115,12 @@ export class PropertyInspector {
             </label>
           </div>
 
+          <!-- FDWS binding.readSimVar/writeEvent — CompositeWidget never reads
+               these (it reads config.definition.components[i].binding
+               instead, via ButtonConfigPopover). Hidden for composites in
+               inspect() below so this dead editor can't write a value the
+               widget silently ignores. -->
+          <div id="fd-insp-binding-group">
           <!-- Deck Event Binding (write) -->
           <div class="fd-insp-field">
             <label for="insp-select-event">Deck Event Trigger (Write)</label>
@@ -137,6 +143,7 @@ export class PropertyInspector {
             <select id="insp-select-custom-simvar"></select>
             <label for="insp-input-custom-simvar">Or type a new custom variable / raw SimVar (L:/A:...)</label>
             <input type="text" id="insp-input-custom-simvar" placeholder="e.g. myCustomVar, L:FBW_TAXI_LIGHT_INTENSITY" />
+          </div>
           </div>
 
           </div>
@@ -269,6 +276,13 @@ export class PropertyInspector {
       genericGroup.classList.toggle('hidden', isConfigurableButton);
     }
 
+    // CompositeWidget reads config.definition.components[i].binding, not
+    // config.binding/writeEvent -- this generic binding editor writes fields
+    // no composite ever reads, so hide it for every composite type (not just
+    // ButtonWidget, whose real binding editor is ButtonConfigPopover).
+    const isComposite = WidgetRegistry.definitions.has(widget.type);
+    this.element.querySelector('#fd-insp-binding-group')?.classList.toggle('hidden', isComposite);
+
     this.open();
   }
 
@@ -323,17 +337,27 @@ export class PropertyInspector {
     const sanitizedEvent = rawEvent ? SecurityValidator.sanitizeEventName(rawEvent) : '';
     const sanitizedSimvar = rawSimvar ? SecurityValidator.sanitizeSimVar(rawSimvar) : '';
 
+    // Composites never read config.writeEvent/config.binding (see the
+    // isComposite check in inspect() -- the fields this form edits are
+    // hidden and hold stale/blank values for this type), so leave those two
+    // keys out of the update entirely rather than overwrite whatever a
+    // composite's own binding editor (ButtonConfigPopover, or a future
+    // per-component one) already wrote to config.definition.
+    const isComposite = WidgetRegistry.definitions.has(this.activeWidget.type);
+
     const newConfig = {
       ...this.activeWidget.config,
       label: cleanLabel || this.activeWidget.config.label || 'WIDGET',
       shortLabel: cleanLabel || this.activeWidget.config.shortLabel || undefined,
       respondToSimEvents: this.tempRespondToSim,
-      writeEvent: sanitizedEvent || undefined,
-      binding: {
-        ...(this.activeWidget.config.binding || {}),
+      ...(isComposite ? {} : {
         writeEvent: sanitizedEvent || undefined,
-        readSimVar: sanitizedSimvar || undefined
-      }
+        binding: {
+          ...(this.activeWidget.config.binding || {}),
+          writeEvent: sanitizedEvent || undefined,
+          readSimVar: sanitizedSimvar || undefined
+        }
+      })
     };
 
     if (this.onSaveConfig) {

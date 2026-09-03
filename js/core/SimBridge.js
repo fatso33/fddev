@@ -128,6 +128,9 @@ export class SimBridge {
         // 1. Request initial telemetry state
         this.requestFullState();
 
+        // 1b. 0.2-B(c): pending/unmapped bindings -- see requestPendingMappings()
+        this.requestPendingMappings();
+
         // 2. Resync registered custom dynamic SimVars/Events
         this.resyncActiveSchemaManifest();
 
@@ -299,6 +302,13 @@ export class SimBridge {
     // itself, redundantly) on top, silently queuing three bogus "simvar"
     // entries into every telemetry frame that had a `.data` wrapper at all.
     if (packet.type === 'simData' || packet.data || packet.com1_act !== undefined) {
+      // 0.2-B(d): requestState's response is also type 'simData' and is the
+      // only simData message that ever carries a `profile` field -- periodic
+      // broadcasts from updateSimVars() never do. This is that field's one
+      // arrival point; PROFILE_CHANGED (below) covers a live in-session switch.
+      if (packet.profile) {
+        this.eventBus.publish('BINDING_PROFILE_CHANGED', { name: packet.profile });
+      }
       const telemetry = packet.data || packet;
       this.eventBus.ingestTelemetry(telemetry);
       return;
@@ -311,6 +321,65 @@ export class SimBridge {
     // SimConnect (sim) status, distinct from the PC Bridge WebSocket status above
     if (packet.type === 'STATUS') {
       this.eventBus.publish('SIM_STATUS', { connected: !!packet.connected });
+      return;
+    }
+
+    // 0.2-B(d): fires on a live profile switch (from PC Bridge's own UI) --
+    // was already broadcast server-side (broadcastProfileChange()) but never
+    // handled here.
+    if (packet.type === 'PROFILE_CHANGED') {
+      this.eventBus.publish('BINDING_PROFILE_CHANGED', { name: packet.profileName });
+      return;
+    }
+
+    // 0.2-B(c): response to requestPendingMappings() below, called once on
+    // every connect so a phone that missed the one-shot
+    // PENDING_MAPPINGS_UPDATED broadcast (virtually always -- it fires only
+    // at widget-install time, which the phone is rarely connected for) still
+    // sees what needs configuring before flight.
+    if (packet.type === 'PENDING_MAPPINGS_RESPONSE') {
+      this.eventBus.publish('PENDING_MAPPINGS_UPDATED', { pending: packet.pending || [] });
+      return;
+    }
+
+    // Broadcast fired only when a widget install adds new unmapped entries
+    // (added > 0) -- carries a count, not the full list, so a session that's
+    // open when it fires just re-requests the full list rather than trying
+    // to reconstruct it from `added`/`widgetId` alone.
+    if (packet.type === 'PENDING_MAPPINGS_UPDATED') {
+      this.requestPendingMappings();
+      return;
+    }
+
+    // 0.2-B(b): rendered previously only in pc-bridge's own bridge-ui.html/
+    // config-ui.html.
+    if (packet.type === 'SIMVAR_BINDING_ERROR') {
+      this.eventBus.publish('SIMVAR_BINDING_ERROR', packet);
+      return;
+    }
+
+    // 0.2-B(a): the write-dispatch failure path (dispatchSimEvent()) used to
+    // be silent -- console.warn() on the PC, nothing on the phone that just
+    // pressed the button.
+    if (packet.type === 'SIM_EVENT_DISPATCH_FAILED') {
+      this.eventBus.publish('SIM_EVENT_DISPATCH_FAILED', packet);
+      return;
+    }
+
+    // 0.3-B: responses to probeReadSimVar()/testExecuteCalculatorCode()/
+    // resolveDeckEvent() below -- same generic pendingAcks correlation
+    // fetchAllUserPresets() etc. already use, just routed for five response
+    // types at once since all three RPCs share this one resolution shape.
+    if (
+      packet.type === 'PROBE_READ_RESULT' || packet.type === 'PROBE_READ_ERROR' ||
+      packet.type === 'PROBE_WRITE_RESULT' || packet.type === 'PROBE_WRITE_ERROR' ||
+      packet.type === 'RESOLVE_DECK_EVENT_RESULT'
+    ) {
+      if (packet.requestId && this.pendingAcks.has(packet.requestId)) {
+        const resolve = this.pendingAcks.get(packet.requestId);
+        this.pendingAcks.delete(packet.requestId);
+        resolve(packet);
+      }
       return;
     }
 
@@ -344,6 +413,16 @@ export class SimBridge {
    */
   requestFullState() {
     this.sendRaw({ type: 'requestState' });
+  }
+
+  /**
+   * 0.2-B(c): asks PC Bridge for every currently-unmapped auto-discovered
+   * binding across all profiles. Response arrives as PENDING_MAPPINGS_RESPONSE
+   * (see handleIncomingMessage()) -- fire-and-forget, no requestId
+   * correlation needed since nothing here awaits a specific response.
+   */
+  requestPendingMappings() {
+    this.sendRaw({ type: 'GET_PENDING_MAPPINGS', requestId: `pm_${Date.now()}` });
   }
 
   /**
@@ -435,6 +514,83 @@ export class SimBridge {
           resolve({ status: 'TIMEOUT' });
         }
       }, 6000);
+    });
+  }
+
+  /**
+   * 0.3-B: paste-and-test read-side probe -- adds `rawName` to PC Bridge's
+   * own scratch data definition (server.js's probeReadSimVar(), isolated
+   * from every real widget's chunk) and returns one live value. Same
+   * function config-ui.html calls over Electron IPC; this is the WS RPC
+   * path for a plain web page (Widget Studio) with no IPC access.
+   * @param {string} rawName - raw A:/L:-prefixed address (H:/K: rejected)
+   * @param {string} [unit]
+   * @returns {Promise<number>}
+   */
+  probeReadSimVar(rawName, unit) {
+    if (!this.connected) return Promise.reject(new Error('Not connected to PC Bridge.'));
+    const requestId = `probe_read_${this.reqCounter++}_${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      this.pendingAcks.set(requestId, (packet) => {
+        if (packet.type === 'PROBE_READ_ERROR') reject(new Error(packet.reason));
+        else resolve(packet.value);
+      });
+      this.sendRaw({ type: 'PROBE_READ_SIMVAR', requestId, rawName, unit });
+      setTimeout(() => {
+        if (this.pendingAcks.has(requestId)) {
+          this.pendingAcks.delete(requestId);
+          reject(new Error('Timed out waiting for PC Bridge.'));
+        }
+      }, 4000);
+    });
+  }
+
+  /**
+   * 0.3-B paste-box write test: executes arbitrary calculator code verbatim
+   * via the WASM shim (server.js's testExecuteCalculatorCode()) -- test
+   * path only, never the save path (a saved binding always dispatches
+   * through the real transmitClientEvent path at runtime). See the paste
+   * box's own hazard labelling for why that distinction matters.
+   * @param {string} code
+   * @returns {Promise<{executed: boolean|null, fvalue: number|null, timedOut: boolean}>}
+   */
+  testExecuteCalculatorCode(code) {
+    if (!this.connected) return Promise.reject(new Error('Not connected to PC Bridge.'));
+    const requestId = `probe_write_${this.reqCounter++}_${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      this.pendingAcks.set(requestId, (packet) => {
+        if (packet.type === 'PROBE_WRITE_ERROR') reject(new Error(packet.reason));
+        else resolve({ executed: packet.executed, fvalue: packet.fvalue, timedOut: packet.timedOut });
+      });
+      this.sendRaw({ type: 'PROBE_TEST_WRITE', requestId, code });
+      setTimeout(() => {
+        if (this.pendingAcks.has(requestId)) {
+          this.pendingAcks.delete(requestId);
+          reject(new Error('Timed out waiting for PC Bridge.'));
+        }
+      }, 4000);
+    });
+  }
+
+  /**
+   * 0.1-C(c)/0.3-B: resolves a bare Deck Event's live unit + active profile
+   * name, e.g. "Bco16 — from profile 'Default'" -- read-only, mirrors
+   * exactly what the real dynamic-subscribe path would resolve to.
+   * @param {string} logicalName
+   * @returns {Promise<{simVar: string, unit: string, profileName: string}|null>}
+   */
+  resolveDeckEvent(logicalName) {
+    if (!this.connected) return Promise.resolve(null);
+    const requestId = `resolve_de_${this.reqCounter++}_${Date.now()}`;
+    return new Promise((resolve) => {
+      this.pendingAcks.set(requestId, (packet) => resolve(packet.resolved));
+      this.sendRaw({ type: 'RESOLVE_DECK_EVENT', requestId, logicalName });
+      setTimeout(() => {
+        if (this.pendingAcks.has(requestId)) {
+          this.pendingAcks.delete(requestId);
+          resolve(null);
+        }
+      }, 4000);
     });
   }
 

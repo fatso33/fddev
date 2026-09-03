@@ -275,6 +275,27 @@ body {
   background: var(--well-bg);
 }
 
+/* 0.2-B: Binding Diagnostics menu section */
+.menu-binding-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--well-bg);
+}
+.menu-binding-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--menu-text);
+}
+.menu-binding-status-row.menu-binding-pending {
+  color: var(--accent-amber);
+}
+
 .theme-label-group {
   display: flex;
   align-items: center;
