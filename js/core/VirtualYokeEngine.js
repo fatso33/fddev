@@ -213,6 +213,7 @@ export class VirtualYokeEngine {
       if (!granted) return false;
     }
     if (!this.listening) this.start();
+    if (!this._lastMatrix) await this._waitForFirstSample();
 
     this._referenceMatrix = this._lastMatrix || VirtualYokeEngine._buildRotationMatrix(0, 0, 0);
     this.hasReference = true;
@@ -247,6 +248,41 @@ export class VirtualYokeEngine {
       this._emitDeflection();
     }
     this._emitState();
+  }
+
+  /**
+   * Resolves once _lastMatrix holds a real sample. start() only attaches the
+   * deviceorientation listener — the first sample always arrives on a later
+   * tick, never synchronously — so center() calling straight through to
+   * _referenceMatrix assignment right after a fresh start() (the common path
+   * on Android, where requestPermission() has no user-gesture gate and
+   * resolves immediately) could otherwise capture the identity-matrix
+   * fallback below instead of the phone's true mounted orientation. That's
+   * not a transient glitch: a wrong reference is a fixed rotational offset
+   * baked into every subsequent delta, and composing a real physical roll
+   * with a stale/wrong offset is exactly what reintroduces the pitch/roll
+   * coupling _decompose()'s delta-from-reference technique exists to
+   * prevent — reproduced live by mounting at an incline and centering
+   * immediately after page load, before any sample had arrived. Times out
+   * so a browser that never fires the event still falls back to the prior
+   * identity behavior rather than hanging center() forever.
+   * @returns {Promise<void>}
+   */
+  _waitForFirstSample() {
+    if (this._lastMatrix) return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        window.removeEventListener('deviceorientation', onSample);
+        clearTimeout(timer);
+        resolve();
+      };
+      const onSample = () => finish();
+      window.addEventListener('deviceorientation', onSample);
+      const timer = setTimeout(finish, 500);
+    });
   }
 
   _onOrientation(event) {
