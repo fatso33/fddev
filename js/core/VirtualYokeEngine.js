@@ -77,6 +77,29 @@ export class VirtualYokeEngine {
   static EXPO_K_FREEHAND = 0.5;
   static EXPO_K_MOUNTED = 0.15;
 
+  // Fixed rotational offset (degrees, about the device's own short/beta
+  // axis) between the phone's own coordinate axes and a rigid rig's true
+  // roll/pitch axes — e.g. a phone taped flat to a yoke column that's
+  // itself built at a 35° incline. This is NOT the same thing a reference
+  // capture (center()) cancels: center() only cancels *which way the whole
+  // assembly happens to be pointed* at calibration time; it can't cancel a
+  // fixed misalignment between the phone's axes and the wheel's actual
+  // spin axis, because that misalignment is baked into the mount itself and
+  // stays constant regardless of the assembly's absolute orientation.
+  // Left uncorrected, a pure wheel-roll on an inclined rig decomposes as a
+  // proportional mix of roll AND pitch (see _onOrientation) — reported live
+  // on two devices, persisting even after center()'s own first-sample race
+  // was fixed, which is what confirmed this is a distinct, mount-geometry
+  // issue rather than a stale/wrong reference. 0 (default) matches prior
+  // behavior exactly (freehand, or a rig built with no cradle tilt).
+  // User-adjustable from the Settings page (Virtual Yoke card); see
+  // setMountTiltDeg(). Sign is empirically tuned per rig — if increasing the
+  // value makes the coupling worse instead of better, flip to negative.
+  static DEFAULT_MOUNT_TILT_DEG = 0;
+  static MOUNT_TILT_MIN_DEG = -90;
+  static MOUNT_TILT_MAX_DEG = 90;
+  static MOUNT_TILT_STORAGE_KEY = 'flightdeck_yoke_mount_tilt_deg';
+
   constructor(eventBus) {
     this.eventBus = eventBus;
 
@@ -102,6 +125,11 @@ export class VirtualYokeEngine {
       VirtualYokeEngine.ROLL_STORAGE_KEY, VirtualYokeEngine.DEFAULT_ROLL_SENSITIVITY_DEG
     );
     this.mountMode = VirtualYokeEngine._loadMountMode();
+
+    this.mountTiltDeg = VirtualYokeEngine._loadMountTilt();
+    // Precomputed once (rebuilt only on setMountTiltDeg()) rather than every
+    // sample — see _onOrientation's mount-offset correction.
+    this._mountMatrix = VirtualYokeEngine._buildRotationMatrix(0, this.mountTiltDeg, 0);
 
     // Current commanded deflection, normalized to -1..1 per axis (shaped by
     // the response curve, same value the axis dispatch is derived from) —
@@ -306,7 +334,25 @@ export class VirtualYokeEngine {
     // reading beta/gamma directly) avoids gimbal-lock artifacts when the
     // phone is held near-vertical, as it normally is for this page.
     const delta = VirtualYokeEngine._transposeMultiply(this._referenceMatrix, this._lastMatrix);
-    const euler = VirtualYokeEngine._decompose(delta);
+
+    // Mount-offset correction: a rig that holds the phone at a fixed cradle
+    // tilt (mountTiltDeg) rotates the wheel's true roll/pitch axes away from
+    // the phone's own alpha/gamma axes by that same fixed amount, so a pure
+    // physical wheel-roll is actually a rotation about "the alpha axis,
+    // rotated by mountTiltDeg" — decomposing it directly would leak into
+    // gamma too. Conjugating delta by _mountMatrix (R_mount^T * delta *
+    // R_mount) re-expresses that same physical rotation as if it happened
+    // about the un-rotated alpha/gamma axes, so decompose() below isolates
+    // it cleanly again. mountTiltDeg=0 (default) makes _mountMatrix the
+    // identity, a no-op — this only engages for a rig that's declared a
+    // nonzero tilt in Settings.
+    const correctedDelta = this.mountTiltDeg === 0
+      ? delta
+      : VirtualYokeEngine._transposeMultiply(
+          this._mountMatrix,
+          VirtualYokeEngine._multiply(delta, this._mountMatrix)
+        );
+    const euler = VirtualYokeEngine._decompose(correctedDelta);
 
     // Landscape-yoke-hold mapping (device screen facing the user, held
     // with both hands): rotating the device about its own long axis
@@ -480,6 +526,26 @@ export class VirtualYokeEngine {
   }
 
   /**
+   * Standard matrix product A × B for two 3x3 matrices — used together with
+   * _transposeMultiply() to conjugate a delta by the fixed mount-offset
+   * matrix (see _onOrientation).
+   * @param {number[][]} A
+   * @param {number[][]} B
+   * @returns {number[][]}
+   */
+  static _multiply(A, B) {
+    const result = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        let sum = 0;
+        for (let k = 0; k < 3; k++) sum += A[i][k] * B[k][j];
+        result[i][j] = sum;
+      }
+    }
+    return result;
+  }
+
+  /**
    * Inverse of _buildRotationMatrix: decomposes a rotation matrix back into
    * (alpha, beta, gamma)-shaped degrees. Applied to a *delta* matrix
    * (rotation from a captured reference to the current sample, always near
@@ -523,7 +589,8 @@ export class VirtualYokeEngine {
       permissionState: this.permissionState,
       pitchSensitivityDeg: this.pitchSensitivityDeg,
       rollSensitivityDeg: this.rollSensitivityDeg,
-      mountMode: this.mountMode
+      mountMode: this.mountMode,
+      mountTiltDeg: this.mountTiltDeg
     };
   }
 
@@ -582,6 +649,57 @@ export class VirtualYokeEngine {
       : VirtualYokeEngine.MOUNT_MODE_FREEHAND;
     VirtualYokeEngine._saveMountMode(this.mountMode);
     this._emitState();
+  }
+
+  /**
+   * Sets and persists the fixed rotational offset (degrees) between the
+   * phone's own axes and a rig's true roll/pitch axes ("Mount Tilt Angle",
+   * Settings page's Virtual Yoke card) — see the class-level doc comment
+   * above DEFAULT_MOUNT_TILT_DEG and _onOrientation's mount-offset
+   * correction. Clamped to [MOUNT_TILT_MIN_DEG, MOUNT_TILT_MAX_DEG].
+   * Rebuilds the cached _mountMatrix; takes effect on the very next
+   * orientation sample, no re-centering needed.
+   * @param {number} deg
+   */
+  setMountTiltDeg(deg) {
+    this.mountTiltDeg = VirtualYokeEngine._clampMountTilt(deg);
+    this._mountMatrix = VirtualYokeEngine._buildRotationMatrix(0, this.mountTiltDeg, 0);
+    VirtualYokeEngine._saveMountTilt(this.mountTiltDeg);
+    this._emitState();
+  }
+
+  /**
+   * @param {number} deg
+   * @returns {number}
+   */
+  static _clampMountTilt(deg) {
+    const n = Number(deg);
+    if (!Number.isFinite(n)) return VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG;
+    return Math.max(VirtualYokeEngine.MOUNT_TILT_MIN_DEG, Math.min(VirtualYokeEngine.MOUNT_TILT_MAX_DEG, n));
+  }
+
+  /**
+   * @returns {number}
+   */
+  static _loadMountTilt() {
+    if (typeof localStorage === 'undefined') return VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG;
+    try {
+      const raw = localStorage.getItem(VirtualYokeEngine.MOUNT_TILT_STORAGE_KEY);
+      if (raw === null) return VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG;
+      return VirtualYokeEngine._clampMountTilt(parseFloat(raw));
+    } catch (_) {
+      return VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG;
+    }
+  }
+
+  /**
+   * @param {number} deg
+   */
+  static _saveMountTilt(deg) {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(VirtualYokeEngine.MOUNT_TILT_STORAGE_KEY, String(deg));
+    } catch (_) {}
   }
 
   /**

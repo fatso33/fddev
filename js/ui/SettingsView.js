@@ -272,6 +272,25 @@ export class SettingsView {
         </div>
 
         <div class="settings-section">
+          <div class="settings-label">Mount tilt angle (rig only) — degrees</div>
+          <div class="settings-custom-ip-row">
+            <input
+              type="number"
+              id="input-yoke-mount-tilt"
+              class="settings-input"
+              min="${VirtualYokeEngine.MOUNT_TILT_MIN_DEG}"
+              max="${VirtualYokeEngine.MOUNT_TILT_MAX_DEG}"
+              step="1"
+              value="${this.virtualYoke ? this.virtualYoke.mountTiltDeg : VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG}"
+            />
+          </div>
+          <p class="settings-hint">If the phone is taped to a yoke column that's itself built at a fixed incline (e.g. 35&deg;), a pure wheel-roll will read as a mix of roll and pitch unless this matches your rig's cradle angle. Leave at 0 for freehand or a rig with no cradle tilt. If increasing the value makes the mixing worse, try the negative of that value instead — sign depends on which way your rig tilts. Takes effect immediately, no re-centering needed.</p>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px;">
+            <div id="yoke-mount-tilt-feedback" class="settings-feedback"></div>
+          </div>
+        </div>
+
+        <div class="settings-section">
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
             <div>
               <div class="settings-label">Pitch (forward / back) — degrees</div>
@@ -872,6 +891,22 @@ export class SettingsView {
         if (pitchInput) pitchInput.value = this.virtualYoke.pitchSensitivityDeg;
         if (rollInput) rollInput.value = this.virtualYoke.rollSensitivityDeg;
         showYokeFeedback('Reset to default.');
+      });
+    }
+
+    // Virtual Yoke Mount Tilt Angle
+    const mountTiltInput = this.container.querySelector('#input-yoke-mount-tilt');
+    const mountTiltFeedback = this.container.querySelector('#yoke-mount-tilt-feedback');
+    if (mountTiltInput) {
+      mountTiltInput.addEventListener('change', () => {
+        if (!this.virtualYoke) return;
+        this.virtualYoke.setMountTiltDeg(parseFloat(mountTiltInput.value));
+        mountTiltInput.value = this.virtualYoke.mountTiltDeg;
+        if (mountTiltFeedback) {
+          mountTiltFeedback.textContent = 'Mount tilt angle saved.';
+          mountTiltFeedback.className = 'settings-feedback success';
+          setTimeout(() => { if (mountTiltFeedback) mountTiltFeedback.textContent = ''; }, 2500);
+        }
       });
     }
 
