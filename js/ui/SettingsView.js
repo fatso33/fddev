@@ -292,6 +292,15 @@ export class SettingsView {
         </div>
 
         <div class="settings-section">
+          <div class="settings-label">Invert direction</div>
+          <p class="settings-hint">Which physical direction reads as "positive" is arbitrary once an axis is measured rather than assumed — it depends on which extreme you happened to move toward during calibration. If a control reads backwards (rolling right banks left, etc.), flip it here instead of redoing calibration.</p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="btn-yoke-invert-roll" class="settings-btn-secondary${this.virtualYoke && this.virtualYoke.rollInvert ? ' active' : ''}">Invert Roll</button>
+            <button id="btn-yoke-invert-pitch" class="settings-btn-secondary${this.virtualYoke && this.virtualYoke.pitchInvert ? ' active' : ''}">Invert Pitch</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
             <div>
               <div class="settings-label">Pitch (forward / back) — degrees</div>
@@ -938,6 +947,24 @@ export class SettingsView {
         this.virtualYoke.resetAxisCalibration();
         showAxisFeedback('Reset to default axes.', false);
         this.render();
+      });
+    }
+
+    // Virtual Yoke Invert Direction
+    const invertRollBtn = this.container.querySelector('#btn-yoke-invert-roll');
+    const invertPitchBtn = this.container.querySelector('#btn-yoke-invert-pitch');
+    if (invertRollBtn) {
+      invertRollBtn.addEventListener('click', () => {
+        if (!this.virtualYoke) return;
+        this.virtualYoke.setRollInvert(!this.virtualYoke.rollInvert);
+        invertRollBtn.classList.toggle('active', this.virtualYoke.rollInvert);
+      });
+    }
+    if (invertPitchBtn) {
+      invertPitchBtn.addEventListener('click', () => {
+        if (!this.virtualYoke) return;
+        this.virtualYoke.setPitchInvert(!this.virtualYoke.pitchInvert);
+        invertPitchBtn.classList.toggle('active', this.virtualYoke.pitchInvert);
       });
     }
 
