@@ -77,28 +77,37 @@ export class VirtualYokeEngine {
   static EXPO_K_FREEHAND = 0.5;
   static EXPO_K_MOUNTED = 0.15;
 
-  // Fixed rotational offset (degrees, about the device's own short/beta
-  // axis) between the phone's own coordinate axes and a rigid rig's true
-  // roll/pitch axes — e.g. a phone taped flat to a yoke column that's
-  // itself built at a 35° incline. This is NOT the same thing a reference
-  // capture (center()) cancels: center() only cancels *which way the whole
-  // assembly happens to be pointed* at calibration time; it can't cancel a
-  // fixed misalignment between the phone's axes and the wheel's actual
-  // spin axis, because that misalignment is baked into the mount itself and
-  // stays constant regardless of the assembly's absolute orientation.
-  // Left uncorrected, a pure wheel-roll on an inclined rig decomposes as a
-  // proportional mix of roll AND pitch (see _onOrientation) — reported live
-  // on two devices, persisting even after center()'s own first-sample race
-  // was fixed, which is what confirmed this is a distinct, mount-geometry
-  // issue rather than a stale/wrong reference. 0 (default) matches prior
-  // behavior exactly (freehand, or a rig built with no cradle tilt).
-  // User-adjustable from the Settings page (Virtual Yoke card); see
-  // setMountTiltDeg(). Sign is empirically tuned per rig — if increasing the
-  // value makes the coupling worse instead of better, flip to negative.
-  static DEFAULT_MOUNT_TILT_DEG = 0;
-  static MOUNT_TILT_MIN_DEG = -90;
-  static MOUNT_TILT_MAX_DEG = 90;
-  static MOUNT_TILT_STORAGE_KEY = 'flightdeck_yoke_mount_tilt_deg';
+  // A rig that holds the phone at a fixed cradle angle rotates the wheel's
+  // true roll/pitch axes away from the phone's own alpha (screen-normal) /
+  // gamma (long-axis) axes by however that specific mount is built — NOT
+  // something a reference capture (center()) can cancel, since it's baked
+  // into the mount's geometry rather than into which way the assembly
+  // happens to be pointed. A first attempt at correcting this with a
+  // manually-entered tilt angle (rotating the decomposition basis about an
+  // assumed axis) didn't hold up live — the assumed axis was a guess about
+  // this specific rig's geometry with no way to verify it without seeing
+  // the physical mount, and it turned out wrong. Superseded by measuring the
+  // rig's true roll/pitch axes directly (see calibrateRollAxis()/
+  // calibratePitchAxis() below) instead of guessing them — see
+  // docs/Virtual-Yoke-Page.md's mount-offset section for the fuller history.
+  //
+  // Below this angle (degrees), a calibration sample's measured rotation is
+  // rejected — near a zero rotation, the axis-angle extraction's direction
+  // is numerically unstable (ill-defined as the angle approaches 0).
+  static AXIS_CALIBRATION_MIN_DEG = 8;
+
+  static ROLL_AXIS_STORAGE_KEY = 'flightdeck_yoke_roll_axis';
+  static PITCH_AXIS_STORAGE_KEY = 'flightdeck_yoke_pitch_axis';
+  static HAS_AXIS_CALIBRATION_STORAGE_KEY = 'flightdeck_yoke_has_axis_calibration';
+
+  // Default roll/pitch axes (unit vectors, in the (beta, gamma, alpha)-axis
+  // basis _axisAngleFromMatrix() extracts into) — exactly the phone's own
+  // screen-normal and long axes, matching this engine's original
+  // freehand-tuned assumption. Used whenever a rig hasn't been through
+  // calibrateRollAxis()/calibratePitchAxis() yet, so an uncalibrated rig
+  // (or freehand use, where this assumption is correct) behaves as before.
+  static DEFAULT_ROLL_AXIS = [0, 0, 1];
+  static DEFAULT_PITCH_AXIS = [0, 1, 0];
 
   constructor(eventBus) {
     this.eventBus = eventBus;
@@ -126,10 +135,15 @@ export class VirtualYokeEngine {
     );
     this.mountMode = VirtualYokeEngine._loadMountMode();
 
-    this.mountTiltDeg = VirtualYokeEngine._loadMountTilt();
-    // Precomputed once (rebuilt only on setMountTiltDeg()) rather than every
-    // sample — see _onOrientation's mount-offset correction.
-    this._mountMatrix = VirtualYokeEngine._buildRotationMatrix(0, this.mountTiltDeg, 0);
+    const storedAxes = VirtualYokeEngine._loadAxisCalibration();
+    this.hasAxisCalibration = storedAxes.hasAxisCalibration;
+    this._rollAxis = storedAxes.rollAxis;
+    this._pitchAxis = storedAxes.pitchAxis;
+    // Raw (pre-orthogonalization) single-axis measurements captured by
+    // calibrateRollAxis()/calibratePitchAxis() — session-only scratch state,
+    // not persisted; see _calibrateAxis().
+    this._rollAxisRaw = null;
+    this._pitchAxisRaw = null;
 
     // Current commanded deflection, normalized to -1..1 per axis (shaped by
     // the response curve, same value the axis dispatch is derived from) —
@@ -289,7 +303,7 @@ export class VirtualYokeEngine {
    * not a transient glitch: a wrong reference is a fixed rotational offset
    * baked into every subsequent delta, and composing a real physical roll
    * with a stale/wrong offset is exactly what reintroduces the pitch/roll
-   * coupling _decompose()'s delta-from-reference technique exists to
+   * coupling the delta-from-reference technique exists to
    * prevent — reproduced live by mounting at an incline and centering
    * immediately after page load, before any sample had arrived. Times out
    * so a browser that never fires the event still falls back to the prior
@@ -335,35 +349,25 @@ export class VirtualYokeEngine {
     // phone is held near-vertical, as it normally is for this page.
     const delta = VirtualYokeEngine._transposeMultiply(this._referenceMatrix, this._lastMatrix);
 
-    // Mount-offset correction: a rig that holds the phone at a fixed cradle
-    // tilt (mountTiltDeg) rotates the wheel's true roll/pitch axes away from
-    // the phone's own alpha/gamma axes by that same fixed amount, so a pure
-    // physical wheel-roll is actually a rotation about "the alpha axis,
-    // rotated by mountTiltDeg" — decomposing it directly would leak into
-    // gamma too. Conjugating delta by _mountMatrix (R_mount^T * delta *
-    // R_mount) re-expresses that same physical rotation as if it happened
-    // about the un-rotated alpha/gamma axes, so decompose() below isolates
-    // it cleanly again. mountTiltDeg=0 (default) makes _mountMatrix the
-    // identity, a no-op — this only engages for a rig that's declared a
-    // nonzero tilt in Settings.
-    const correctedDelta = this.mountTiltDeg === 0
-      ? delta
-      : VirtualYokeEngine._transposeMultiply(
-          this._mountMatrix,
-          VirtualYokeEngine._multiply(delta, this._mountMatrix)
-        );
-    const euler = VirtualYokeEngine._decompose(correctedDelta);
+    // Axis-angle (not Euler-sequence) decomposition: extracts delta's
+    // rotation as a single (axis, angleDeg) pair, then projects that onto
+    // this rig's own roll/pitch axes via dot product. Uncalibrated, those
+    // axes default to the phone's own alpha (screen-normal) and gamma
+    // (long-axis) directions — the original freehand-tuned assumption,
+    // exactly matching prior behavior for freehand use or a rig with no
+    // cradle tilt. calibrateRollAxis()/calibratePitchAxis() (see below)
+    // measure the rig's *actual* axes instead of assuming them, which a
+    // fixed Euler-sequence decomposition has no way to do — a mount that
+    // holds the phone at any fixed cradle angle rotates its true roll/pitch
+    // axes away from alpha/gamma by that same fixed, otherwise-unknowable
+    // (from software alone) amount. See docs/Virtual-Yoke-Page.md's
+    // mount-offset section for the fuller history, including why a
+    // manually-entered tilt angle didn't hold up as a fix.
+    const { axis, angleDeg } = VirtualYokeEngine._axisAngleFromMatrix(delta);
+    const rvx = axis[0] * angleDeg, rvy = axis[1] * angleDeg, rvz = axis[2] * angleDeg;
+    const rollDeg = VirtualYokeEngine._dot([rvx, rvy, rvz], this._rollAxis);
+    const pitchDegRaw = VirtualYokeEngine._dot([rvx, rvy, rvz], this._pitchAxis);
 
-    // Landscape-yoke-hold mapping (device screen facing the user, held
-    // with both hands): rotating the device about its own long axis
-    // (decomposed as delta's "gamma") is the push/pull motion — pitch.
-    // Rotating it about its own screen-normal axis (decomposed as delta's
-    // "alpha") is the bank motion — roll. The third component
-    // (delta's "beta", rotation about the device's short axis — a yaw-like
-    // wrist twist when held this way) isn't a yoke input and is ignored.
-    // Sign is empirically tuned; flip either line's leading minus if a
-    // device reports that axis inverted.
-    //
     // Landscape-primary vs. landscape-secondary hold flips pitch, not roll:
     // "pitch" is a rotation about the device's own long (body) axis, and
     // that axis physically reverses direction between the two landscape
@@ -371,13 +375,14 @@ export class VirtualYokeEngine {
     // nose-up/nose-down motion the pilot is making is identical either way.
     // "Roll" is a rotation about the screen-normal axis, which points out of
     // the screen toward the user in *both* holds, so it needs no
-    // correction — this matches the reported bug exactly (pitch inverted in
-    // one landscape orientation, roll fine in both). screen.orientation.lock
-    // ('landscape') permits either hold with no further signal from the
-    // OS, so this has to be corrected here rather than upstream.
+    // correction. screen.orientation.lock('landscape') permits either hold
+    // with no further signal from the OS, so this has to be corrected here
+    // rather than upstream. Applies identically whether the roll/pitch axes
+    // are the defaults or a calibrated rig's measured axes — it's a
+    // downstream sign convention on the projected value, unrelated to which
+    // axis the value was projected onto.
     const pitchSign = VirtualYokeEngine._getScreenOrientationAngle() === 270 ? -1 : 1;
-    const pitchDeg = pitchSign * euler.gamma;
-    const rollDeg = euler.alpha;
+    const pitchDeg = pitchSign * pitchDegRaw;
 
     const expoK = this.mountMode === VirtualYokeEngine.MOUNT_MODE_MOUNTED
       ? VirtualYokeEngine.EXPO_K_MOUNTED
@@ -526,59 +531,55 @@ export class VirtualYokeEngine {
   }
 
   /**
-   * Standard matrix product A × B for two 3x3 matrices — used together with
-   * _transposeMultiply() to conjugate a delta by the fixed mount-offset
-   * matrix (see _onOrientation).
-   * @param {number[][]} A
-   * @param {number[][]} B
-   * @returns {number[][]}
+   * Decomposes a rotation matrix into an (axis, angle) pair instead of a
+   * fixed-sequence Euler triple — the standard axis-angle/log-map extraction.
+   * Applied to a *delta* matrix (rotation from a captured reference to the
+   * current sample, always near identity for a modest physical tilt) rather
+   * than to the device's raw absolute orientation, this is what actually
+   * fixes the gimbal-lock bug: the naive approach of reading beta/gamma
+   * straight off the raw sensor event is singular exactly when the device is
+   * held near-vertical (beta ≈ ±90°) — precisely the normal holding posture
+   * for this page (landscape, screen facing the user, like a real yoke) —
+   * which is why pushing pitch further caused roll to snap to a random
+   * extreme. Delta-from-reference is never near that singularity for any
+   * tilt within this engine's clamped sensitivity range, regardless of how
+   * the phone is being held. See docs/Virtual-Yoke-Page.md's "Gimbal lock"
+   * section.
+   *
+   * Unlike a fixed Euler sequence (this engine's original approach), the
+   * extracted axis is a genuine 3D direction that calibrateRollAxis()/
+   * calibratePitchAxis() can measure directly from real motion and
+   * _onOrientation can project future deltas onto — see the mount-offset
+   * section of the same doc for why a rig's true roll/pitch axes can't be
+   * assumed to be the phone's own alpha/gamma axes.
+   * @param {number[][]} M
+   * @returns {{axis: number[], angleDeg: number}} unit axis (all-zero if
+   *   angleDeg is ~0, direction undefined for no rotation) and angle in
+   *   degrees, always >= 0
    */
-  static _multiply(A, B) {
-    const result = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 3; j++) {
-        let sum = 0;
-        for (let k = 0; k < 3; k++) sum += A[i][k] * B[k][j];
-        result[i][j] = sum;
-      }
+  static _axisAngleFromMatrix(M) {
+    const trace = M[0][0] + M[1][1] + M[2][2];
+    const cosTheta = Math.max(-1, Math.min(1, (trace - 1) / 2));
+    const theta = Math.acos(cosTheta);
+    const sinTheta = Math.sin(theta);
+    if (Math.abs(sinTheta) < 1e-6) {
+      return { axis: [0, 0, 0], angleDeg: theta * 180 / Math.PI };
     }
-    return result;
+    const axis = [
+      (M[2][1] - M[1][2]) / (2 * sinTheta),
+      (M[0][2] - M[2][0]) / (2 * sinTheta),
+      (M[1][0] - M[0][1]) / (2 * sinTheta)
+    ];
+    return { axis, angleDeg: theta * 180 / Math.PI };
   }
 
   /**
-   * Inverse of _buildRotationMatrix: decomposes a rotation matrix back into
-   * (alpha, beta, gamma)-shaped degrees. Applied to a *delta* matrix
-   * (rotation from a captured reference to the current sample, always near
-   * identity for a modest physical tilt) rather than to the device's raw
-   * absolute orientation, this is what actually fixes the gimbal-lock bug:
-   * the naive approach of reading beta/gamma straight off the raw sensor
-   * event is singular exactly when the device is held near-vertical
-   * (beta ≈ ±90°) — precisely the normal holding posture for this page
-   * (landscape, screen facing the user, like a real yoke) — which is why
-   * pushing pitch further caused roll to snap to a random extreme. Delta-
-   * from-reference is never near that singularity for any tilt within
-   * this engine's clamped ±PITCH_SENSITIVITY_DEG/±ROLL_SENSITIVITY_DEG
-   * range, regardless of how the phone is being held. See
-   * docs/Virtual-Yoke-Page.md's "Gimbal lock"
-   * section.
-   * @param {number[][]} M
-   * @returns {{alpha: number, beta: number, gamma: number}} degrees
+   * @param {number[]} a
+   * @param {number[]} b
+   * @returns {number}
    */
-  static _decompose(M) {
-    const clamp = (v) => Math.max(-1, Math.min(1, v));
-    const beta = Math.asin(clamp(M[2][1]));
-    const cb = Math.cos(beta);
-    let alpha = 0;
-    let gamma = 0;
-    if (Math.abs(cb) > 1e-6) {
-      gamma = Math.atan2(-M[2][0], M[2][2]);
-      alpha = Math.atan2(-M[0][1], M[1][1]);
-    }
-    return {
-      alpha: alpha * 180 / Math.PI,
-      beta: beta * 180 / Math.PI,
-      gamma: gamma * 180 / Math.PI
-    };
+  static _dot(a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   }
 
   getState() {
@@ -590,7 +591,7 @@ export class VirtualYokeEngine {
       pitchSensitivityDeg: this.pitchSensitivityDeg,
       rollSensitivityDeg: this.rollSensitivityDeg,
       mountMode: this.mountMode,
-      mountTiltDeg: this.mountTiltDeg
+      hasAxisCalibration: this.hasAxisCalibration
     };
   }
 
@@ -652,53 +653,126 @@ export class VirtualYokeEngine {
   }
 
   /**
-   * Sets and persists the fixed rotational offset (degrees) between the
-   * phone's own axes and a rig's true roll/pitch axes ("Mount Tilt Angle",
-   * Settings page's Virtual Yoke card) — see the class-level doc comment
-   * above DEFAULT_MOUNT_TILT_DEG and _onOrientation's mount-offset
-   * correction. Clamped to [MOUNT_TILT_MIN_DEG, MOUNT_TILT_MAX_DEG].
-   * Rebuilds the cached _mountMatrix; takes effect on the very next
-   * orientation sample, no re-centering needed.
-   * @param {number} deg
+   * Second calibration step, after center() ("Calibrate Roll Axis", Settings
+   * page's Virtual Yoke card). Physically roll the wheel to one extreme —
+   * holding pitch as still as you can — and call this while holding that
+   * position: measures the rig's true roll rotation axis directly from the
+   * resulting delta, rather than assuming it's the phone's own screen-normal
+   * axis (see the mount-offset doc comment above AXIS_CALIBRATION_MIN_DEG
+   * for why that assumption breaks on a rig with any fixed cradle tilt).
+   * A symmetric calibratePitchAxis() call is required too — only once BOTH
+   * axes have been measured are they orthogonalized and saved as a pair
+   * (see _calibrateAxis()); calibrating just one leaves the engine on
+   * whatever pair (default or previously-saved) it had before.
+   * @returns {Promise<boolean>} false if not centered yet, or too little
+   *   rotation was captured to measure a stable axis
    */
-  setMountTiltDeg(deg) {
-    this.mountTiltDeg = VirtualYokeEngine._clampMountTilt(deg);
-    this._mountMatrix = VirtualYokeEngine._buildRotationMatrix(0, this.mountTiltDeg, 0);
-    VirtualYokeEngine._saveMountTilt(this.mountTiltDeg);
+  async calibrateRollAxis() {
+    return this._calibrateAxis('roll');
+  }
+
+  /**
+   * calibrateRollAxis()'s pitch counterpart — order between the two doesn't
+   * matter. Physically pull/push the yoke to one pitch extreme, holding
+   * roll still, and call this while holding that position. See
+   * calibrateRollAxis().
+   * @returns {Promise<boolean>}
+   */
+  async calibratePitchAxis() {
+    return this._calibrateAxis('pitch');
+  }
+
+  /**
+   * @param {'roll'|'pitch'} which
+   * @returns {Promise<boolean>}
+   */
+  async _calibrateAxis(which) {
+    if (!this.hasReference || !this._referenceMatrix) return false;
+    if (!this.listening) this.start();
+    await this._waitForFirstSample();
+    if (!this._lastMatrix) return false;
+
+    const delta = VirtualYokeEngine._transposeMultiply(this._referenceMatrix, this._lastMatrix);
+    const { axis, angleDeg } = VirtualYokeEngine._axisAngleFromMatrix(delta);
+    if (angleDeg < VirtualYokeEngine.AXIS_CALIBRATION_MIN_DEG) return false;
+
+    if (which === 'roll') this._rollAxisRaw = axis;
+    else this._pitchAxisRaw = axis;
+
+    if (this._rollAxisRaw && this._pitchAxisRaw) {
+      // Orthogonalize the pitch measurement against roll (Gram-Schmidt) so
+      // human imprecision holding the "other" axis neutral during either
+      // calibration sweep doesn't leak into both projected outputs later.
+      const dot = VirtualYokeEngine._dot(this._pitchAxisRaw, this._rollAxisRaw);
+      const ortho = [
+        this._pitchAxisRaw[0] - dot * this._rollAxisRaw[0],
+        this._pitchAxisRaw[1] - dot * this._rollAxisRaw[1],
+        this._pitchAxisRaw[2] - dot * this._rollAxisRaw[2]
+      ];
+      const orthoNorm = Math.sqrt(ortho[0] * ortho[0] + ortho[1] * ortho[1] + ortho[2] * ortho[2]);
+      if (orthoNorm > 1e-6) {
+        this._rollAxis = this._rollAxisRaw;
+        this._pitchAxis = [ortho[0] / orthoNorm, ortho[1] / orthoNorm, ortho[2] / orthoNorm];
+        this.hasAxisCalibration = true;
+        VirtualYokeEngine._saveAxisCalibration(this._rollAxis, this._pitchAxis, true);
+      }
+    }
+    this._emitState();
+    return true;
+  }
+
+  /**
+   * Clears a calibrated rig's measured roll/pitch axes, reverting to the
+   * phone's own alpha/gamma axes (freehand assumption). ("Reset Axis
+   * Calibration", Settings page's Virtual Yoke card.)
+   */
+  resetAxisCalibration() {
+    this._rollAxisRaw = null;
+    this._pitchAxisRaw = null;
+    this._rollAxis = VirtualYokeEngine.DEFAULT_ROLL_AXIS.slice();
+    this._pitchAxis = VirtualYokeEngine.DEFAULT_PITCH_AXIS.slice();
+    this.hasAxisCalibration = false;
+    VirtualYokeEngine._saveAxisCalibration(this._rollAxis, this._pitchAxis, false);
     this._emitState();
   }
 
   /**
-   * @param {number} deg
-   * @returns {number}
+   * @returns {{hasAxisCalibration: boolean, rollAxis: number[], pitchAxis: number[]}}
    */
-  static _clampMountTilt(deg) {
-    const n = Number(deg);
-    if (!Number.isFinite(n)) return VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG;
-    return Math.max(VirtualYokeEngine.MOUNT_TILT_MIN_DEG, Math.min(VirtualYokeEngine.MOUNT_TILT_MAX_DEG, n));
-  }
-
-  /**
-   * @returns {number}
-   */
-  static _loadMountTilt() {
-    if (typeof localStorage === 'undefined') return VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG;
+  static _loadAxisCalibration() {
+    const fallback = {
+      hasAxisCalibration: false,
+      rollAxis: VirtualYokeEngine.DEFAULT_ROLL_AXIS.slice(),
+      pitchAxis: VirtualYokeEngine.DEFAULT_PITCH_AXIS.slice()
+    };
+    if (typeof localStorage === 'undefined') return fallback;
     try {
-      const raw = localStorage.getItem(VirtualYokeEngine.MOUNT_TILT_STORAGE_KEY);
-      if (raw === null) return VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG;
-      return VirtualYokeEngine._clampMountTilt(parseFloat(raw));
+      const has = localStorage.getItem(VirtualYokeEngine.HAS_AXIS_CALIBRATION_STORAGE_KEY) === 'true';
+      const rollRaw = localStorage.getItem(VirtualYokeEngine.ROLL_AXIS_STORAGE_KEY);
+      const pitchRaw = localStorage.getItem(VirtualYokeEngine.PITCH_AXIS_STORAGE_KEY);
+      if (!has || !rollRaw || !pitchRaw) return fallback;
+      const rollAxis = JSON.parse(rollRaw);
+      const pitchAxis = JSON.parse(pitchRaw);
+      if (!Array.isArray(rollAxis) || rollAxis.length !== 3 || !Array.isArray(pitchAxis) || pitchAxis.length !== 3) {
+        return fallback;
+      }
+      return { hasAxisCalibration: true, rollAxis, pitchAxis };
     } catch (_) {
-      return VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG;
+      return fallback;
     }
   }
 
   /**
-   * @param {number} deg
+   * @param {number[]} rollAxis
+   * @param {number[]} pitchAxis
+   * @param {boolean} hasAxisCalibration
    */
-  static _saveMountTilt(deg) {
+  static _saveAxisCalibration(rollAxis, pitchAxis, hasAxisCalibration) {
     if (typeof localStorage === 'undefined') return;
     try {
-      localStorage.setItem(VirtualYokeEngine.MOUNT_TILT_STORAGE_KEY, String(deg));
+      localStorage.setItem(VirtualYokeEngine.HAS_AXIS_CALIBRATION_STORAGE_KEY, String(hasAxisCalibration));
+      localStorage.setItem(VirtualYokeEngine.ROLL_AXIS_STORAGE_KEY, JSON.stringify(rollAxis));
+      localStorage.setItem(VirtualYokeEngine.PITCH_AXIS_STORAGE_KEY, JSON.stringify(pitchAxis));
     } catch (_) {}
   }
 

@@ -272,21 +272,22 @@ export class SettingsView {
         </div>
 
         <div class="settings-section">
-          <div class="settings-label">Mount tilt angle (rig only) — degrees</div>
-          <div class="settings-custom-ip-row">
-            <input
-              type="number"
-              id="input-yoke-mount-tilt"
-              class="settings-input"
-              min="${VirtualYokeEngine.MOUNT_TILT_MIN_DEG}"
-              max="${VirtualYokeEngine.MOUNT_TILT_MAX_DEG}"
-              step="1"
-              value="${this.virtualYoke ? this.virtualYoke.mountTiltDeg : VirtualYokeEngine.DEFAULT_MOUNT_TILT_DEG}"
-            />
+          <div class="settings-label">Rig axis calibration</div>
+          <p class="settings-hint">If the phone is taped to a yoke column that's itself built at a fixed cradle angle, a pure wheel-roll will read as a mix of roll and pitch unless the engine knows the rig's <em>actual</em> roll/pitch axes — they aren't the same as the phone's own screen-normal/long-axis directions once the mount tilts it. This measures them directly instead of guessing an angle:</p>
+          <ol class="settings-hint" style="padding-left: 18px; margin: 8px 0;">
+            <li>Tap Center on the Virtual Yoke page first (required before either button below will do anything).</li>
+            <li>Roll the wheel fully to one side, holding pitch as still as you can, then tap <strong>Calibrate Roll Axis</strong> while holding that position.</li>
+            <li>Pull/push the yoke to one pitch extreme, holding roll still, then tap <strong>Calibrate Pitch Axis</strong> while holding that position.</li>
+          </ol>
+          <p class="settings-hint">Both steps are required — calibrating only one leaves the previous pair (default or previously-saved) in effect. Persists across sessions once both are done; only needs redoing if you physically remount the phone differently.</p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
+            <button id="btn-yoke-calibrate-roll-axis" class="settings-btn-secondary">Calibrate Roll Axis</button>
+            <button id="btn-yoke-calibrate-pitch-axis" class="settings-btn-secondary">Calibrate Pitch Axis</button>
+            <button id="btn-yoke-reset-axis-calibration" class="settings-btn-secondary">Reset to Default Axes</button>
           </div>
-          <p class="settings-hint">If the phone is taped to a yoke column that's itself built at a fixed incline (e.g. 35&deg;), a pure wheel-roll will read as a mix of roll and pitch unless this matches your rig's cradle angle. Leave at 0 for freehand or a rig with no cradle tilt. If increasing the value makes the mixing worse, try the negative of that value instead — sign depends on which way your rig tilts. Takes effect immediately, no re-centering needed.</p>
           <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px;">
-            <div id="yoke-mount-tilt-feedback" class="settings-feedback"></div>
+            <span style="font-size: 12px; color: var(--text-dim);">Status: ${this.virtualYoke && this.virtualYoke.hasAxisCalibration ? 'Rig axes calibrated' : 'Using default (freehand) axes'}</span>
+            <div id="yoke-axis-calibration-feedback" class="settings-feedback"></div>
           </div>
         </div>
 
@@ -894,19 +895,49 @@ export class SettingsView {
       });
     }
 
-    // Virtual Yoke Mount Tilt Angle
-    const mountTiltInput = this.container.querySelector('#input-yoke-mount-tilt');
-    const mountTiltFeedback = this.container.querySelector('#yoke-mount-tilt-feedback');
-    if (mountTiltInput) {
-      mountTiltInput.addEventListener('change', () => {
+    // Virtual Yoke Rig Axis Calibration
+    const calibrateRollBtn = this.container.querySelector('#btn-yoke-calibrate-roll-axis');
+    const calibratePitchBtn = this.container.querySelector('#btn-yoke-calibrate-pitch-axis');
+    const resetAxisBtn = this.container.querySelector('#btn-yoke-reset-axis-calibration');
+    const axisFeedback = this.container.querySelector('#yoke-axis-calibration-feedback');
+
+    const showAxisFeedback = (msg, isError) => {
+      if (!axisFeedback) return;
+      axisFeedback.textContent = msg;
+      axisFeedback.className = `settings-feedback ${isError ? 'error' : 'success'}`;
+      setTimeout(() => { if (axisFeedback) axisFeedback.textContent = ''; }, 3000);
+    };
+
+    if (calibrateRollBtn) {
+      calibrateRollBtn.addEventListener('click', async () => {
         if (!this.virtualYoke) return;
-        this.virtualYoke.setMountTiltDeg(parseFloat(mountTiltInput.value));
-        mountTiltInput.value = this.virtualYoke.mountTiltDeg;
-        if (mountTiltFeedback) {
-          mountTiltFeedback.textContent = 'Mount tilt angle saved.';
-          mountTiltFeedback.className = 'settings-feedback success';
-          setTimeout(() => { if (mountTiltFeedback) mountTiltFeedback.textContent = ''; }, 2500);
-        }
+        const ok = await this.virtualYoke.calibrateRollAxis();
+        showAxisFeedback(
+          ok ? 'Roll axis captured.' : 'Roll axis capture failed — tap Center first, and roll further before tapping.',
+          !ok
+        );
+        this.render();
+      });
+    }
+
+    if (calibratePitchBtn) {
+      calibratePitchBtn.addEventListener('click', async () => {
+        if (!this.virtualYoke) return;
+        const ok = await this.virtualYoke.calibratePitchAxis();
+        showAxisFeedback(
+          ok ? 'Pitch axis captured.' : 'Pitch axis capture failed — tap Center first, and tilt further before tapping.',
+          !ok
+        );
+        this.render();
+      });
+    }
+
+    if (resetAxisBtn) {
+      resetAxisBtn.addEventListener('click', () => {
+        if (!this.virtualYoke) return;
+        this.virtualYoke.resetAxisCalibration();
+        showAxisFeedback('Reset to default axes.', false);
+        this.render();
       });
     }
 
