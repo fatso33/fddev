@@ -48,18 +48,6 @@ export class VirtualYokeEngine {
   static PITCH_STORAGE_KEY = 'flightdeck_yoke_pitch_sensitivity_deg';
   static ROLL_STORAGE_KEY = 'flightdeck_yoke_roll_sensitivity_deg';
 
-  // Which physical direction reads as positive is arbitrary once an axis is
-  // *measured* rather than assumed (calibrateRollAxis()/calibratePitchAxis()
-  // below) — it depends on which of the two extremes the user happened to
-  // roll/pitch toward during calibration, which has no way to be "guessed
-  // right" in advance. Rather than making a mis-calibrated rig redo the
-  // whole gesture in the opposite direction, these flip the sign of the
-  // final projected value. Applies to the default (uncalibrated) axes too,
-  // generalizing the old "flip either line's leading minus" code-edit this
-  // engine originally needed for a device reporting an axis backwards.
-  static ROLL_INVERT_STORAGE_KEY = 'flightdeck_yoke_roll_invert';
-  static PITCH_INVERT_STORAGE_KEY = 'flightdeck_yoke_pitch_invert';
-
   // Minimum axis-value delta between two consecutive dispatches — avoids
   // flooding PC Bridge's WebSocket with near-duplicate values on every
   // ~16ms deviceorientation tick (EventBus's SIM_EVENT_DISPATCH path has
@@ -156,9 +144,6 @@ export class VirtualYokeEngine {
     // not persisted; see _calibrateAxis().
     this._rollAxisRaw = null;
     this._pitchAxisRaw = null;
-
-    this.rollInvert = VirtualYokeEngine._loadInvert(VirtualYokeEngine.ROLL_INVERT_STORAGE_KEY);
-    this.pitchInvert = VirtualYokeEngine._loadInvert(VirtualYokeEngine.PITCH_INVERT_STORAGE_KEY);
 
     // Current commanded deflection, normalized to -1..1 per axis (shaped by
     // the response curve, same value the axis dispatch is derived from) —
@@ -390,8 +375,8 @@ export class VirtualYokeEngine {
     // manually-entered tilt angle didn't hold up as a fix.
     const { axis, angleDeg } = VirtualYokeEngine._axisAngleFromMatrix(delta);
     const rvx = axis[0] * angleDeg, rvy = axis[1] * angleDeg, rvz = axis[2] * angleDeg;
-    const rollDeg = (this.rollInvert ? -1 : 1) * VirtualYokeEngine._dot([rvx, rvy, rvz], this._rollAxis);
-    const pitchDegRaw = (this.pitchInvert ? -1 : 1) * VirtualYokeEngine._dot([rvx, rvy, rvz], this._pitchAxis);
+    const rollDeg = VirtualYokeEngine._dot([rvx, rvy, rvz], this._rollAxis);
+    const pitchDegRaw = VirtualYokeEngine._dot([rvx, rvy, rvz], this._pitchAxis);
 
     // Landscape-primary vs. landscape-secondary hold flips pitch, not roll:
     // "pitch" is a rotation about the device's own long (body) axis, and
@@ -616,9 +601,7 @@ export class VirtualYokeEngine {
       pitchSensitivityDeg: this.pitchSensitivityDeg,
       rollSensitivityDeg: this.rollSensitivityDeg,
       mountMode: this.mountMode,
-      hasAxisCalibration: this.hasAxisCalibration,
-      rollInvert: this.rollInvert,
-      pitchInvert: this.pitchInvert
+      hasAxisCalibration: this.hasAxisCalibration
     };
   }
 
@@ -677,53 +660,6 @@ export class VirtualYokeEngine {
       : VirtualYokeEngine.MOUNT_MODE_FREEHAND;
     VirtualYokeEngine._saveMountMode(this.mountMode);
     this._emitState();
-  }
-
-  /**
-   * Flips which physical roll direction reads as positive ("Invert Roll",
-   * Settings page's Virtual Yoke card) — see the class-level doc comment
-   * above ROLL_INVERT_STORAGE_KEY. Takes effect on the very next
-   * orientation sample; doesn't require re-calibrating or re-centering.
-   * @param {boolean} invert
-   */
-  setRollInvert(invert) {
-    this.rollInvert = Boolean(invert);
-    VirtualYokeEngine._saveInvert(VirtualYokeEngine.ROLL_INVERT_STORAGE_KEY, this.rollInvert);
-    this._emitState();
-  }
-
-  /**
-   * Pitch counterpart to setRollInvert(). See its doc comment.
-   * @param {boolean} invert
-   */
-  setPitchInvert(invert) {
-    this.pitchInvert = Boolean(invert);
-    VirtualYokeEngine._saveInvert(VirtualYokeEngine.PITCH_INVERT_STORAGE_KEY, this.pitchInvert);
-    this._emitState();
-  }
-
-  /**
-   * @param {string} key
-   * @returns {boolean}
-   */
-  static _loadInvert(key) {
-    if (typeof localStorage === 'undefined') return false;
-    try {
-      return localStorage.getItem(key) === 'true';
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /**
-   * @param {string} key
-   * @param {boolean} value
-   */
-  static _saveInvert(key, value) {
-    if (typeof localStorage === 'undefined') return;
-    try {
-      localStorage.setItem(key, String(value));
-    } catch (_) {}
   }
 
   /**
