@@ -190,6 +190,16 @@ export class VirtualYokeEngine {
     if (!this.listening) return;
     this.listening = false;
     window.removeEventListener('deviceorientation', this._onOrientation);
+    // Invalidate — the device is free to rotate arbitrarily while nothing is
+    // sampling it (e.g. navigating away to Settings and rolling the wheel to
+    // calibrate). A stale non-null _lastMatrix would otherwise let a later
+    // _waitForFirstSample() short-circuit on stop-start restart and hand
+    // center()/calibrateRollAxis()/calibratePitchAxis() a sample from
+    // *before* this stop() instead of waiting for a fresh one after the
+    // next start() — reproduced live as a calibration capture silently
+    // measuring the pre-navigation neutral orientation instead of the
+    // roll/pitch extreme actually being held at button-press time.
+    this._lastMatrix = null;
     if (this._rafId) {
       cancelAnimationFrame(this._rafId);
       this._rafId = null;
