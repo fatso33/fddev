@@ -280,6 +280,7 @@ export class SettingsView {
             <li>Pull/push the yoke to one pitch extreme, holding roll still, then tap <strong>Calibrate Pitch Axis</strong> while holding that position.</li>
           </ol>
           <p class="settings-hint">Both steps are required — calibrating only one leaves the previous pair (default or previously-saved) in effect. Persists across sessions once both are done; only needs redoing if you physically remount the phone differently.</p>
+          <p class="settings-hint">Which direction reads as "positive" depends on which of the two extremes you move toward — there's no way to get this backwards on the axis itself, only on which side you pick. If a control comes out reversed (rolling right banks left, etc.) after calibrating, redo that one step moving toward the <em>opposite</em> extreme instead.</p>
           <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
             <button id="btn-yoke-calibrate-roll-axis" class="settings-btn-secondary">Calibrate Roll Axis</button>
             <button id="btn-yoke-calibrate-pitch-axis" class="settings-btn-secondary">Calibrate Pitch Axis</button>
