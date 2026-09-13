@@ -3,34 +3,67 @@
  * FDWS v1.3: mounts a `kind: "popover"` widget definition inside a modal overlay,
  * opened from a host widget's `core.openWidgetPopover` interaction.
  *
+ * Rotary Component rebuild, ticket 00 (prefactor): this is now the single canonical
+ * overlay primitive, synced wholesale into both apps by scripts/sync-shared.mjs (it
+ * lives under shared/widgets/components/, which is already synced as a whole
+ * directory — see scripts/sync-targets.mjs — so no sync-machinery change was needed
+ * to add it here).
+ *
+ * Previously flight-deck-pwa and widget-studio each hand-maintained a genuinely
+ * independent copy of this file (documented as deliberate in both apps' own READMEs
+ * and the root README, on the reasoning that a popover has to mount through each
+ * app's own widget-hosting machinery — a real CompositeWidget for the PWA, a
+ * MockWidgetHost for Studio's live-preview — which "isn't something shared/'s plain
+ * component-renderer classes can express"). That reasoning held only because this
+ * module used to *construct* that host itself (`new CompositeWidget(...)` in the
+ * PWA's copy, `createMockHost(...)` in Studio's). Making the popover's rendering
+ * host an INJECTED dependency (`createPopoverInstance`, below) rather than something
+ * this module builds removes the reason the two copies had to diverge — the DOM
+ * chrome (overlay/card, escape/backdrop dismissal, single-instance tracking) and the
+ * $context/commitToHost security model were already identical between them. This
+ * also incidentally breaks the circular import the PWA's old copy used to have with
+ * CompositeWidget.js (see its now-removed doc comment) — this module no longer
+ * references either app's host class/factory at all.
+ *
  * Security model: the popover instance only ever sees a resolved, read-only
  * `$context` snapshot (value/writable/applyOn) built from the HOST's own
  * self-authored `stateRef` paths. The popover itself never specifies or sees a
  * raw path — it can only reference a symbolic `contextKey` via `core.commitToHost`,
  * and the write is rejected unless that key was declared `writable: true` by the host.
- *
- * Note: this module and CompositeWidget.js import each other (CompositeWidget's
- * core.openWidgetPopover case calls into here; here we construct a CompositeWidget
- * for the popover definition). This is safe because `CompositeWidget` is only
- * referenced inside openWidgetPopover()'s function body, called well after both
- * modules have finished evaluating — never at module-load time.
  */
 
-import { CompositeWidget } from '../CompositeWidget.js';
-import { WidgetRegistry } from '../WidgetRegistry.js';
 import { readStateRef, writeStateRef } from '../utils/StateRefPath.js';
 
 let activePopover = null;
 
 /**
+ * @typedef {object} PopoverHostInstance
+ * @property {(container: HTMLElement) => void} mount - renders the popover's content into `container`.
+ * @property {() => void} [destroy] - tears down the popover's content (renderers, timers, listeners).
+ *   Optional; called (if present) as part of closing the popover, before the overlay chrome itself
+ *   is removed from the document.
+ */
+
+/**
  * @param {object} opts
- * @param {import('../CompositeWidget.js').CompositeWidget} opts.hostWidget
+ * @param {object} opts.hostWidget - the widget instance whose interaction opened this popover; its
+ *   own stateRef-resolvable state is what `contextDecl`'s stateRef paths read from and write back to.
  * @param {string} opts.popoverWidgetId
  * @param {object} opts.contextDecl - the host action's `context` map
- * @param {object} opts.eventBus
+ * @param {(id: string) => object|null} opts.findPopoverDef - resolves a `kind:"popover"` widget
+ *   definition by id. flight-deck-pwa passes `WidgetRegistry.getDefinition`; Widget Studio passes a
+ *   lookup over its own saved `kind:"popover"` widgets (`StudioState.getSavedWidgetsByKind`).
+ * @param {(args: {popoverDef: object, contextSnapshot: object, onCommitToHost: (contextKey: string, value: any) => void, onClosePopover: () => void}) => PopoverHostInstance} opts.createPopoverInstance
+ *   - injected factory that builds the actual rendering host for the resolved popover definition and
+ *   returns a `{mount, destroy}` handle. flight-deck-pwa's factory constructs a real `CompositeWidget`
+ *   (which already satisfies this shape natively — see its own `mount()`/`destroy()`); Widget Studio's
+ *   factory constructs a `MockWidgetHost`-backed renderer set (`MockWidgetHost.js`'s
+ *   `createPopoverHost()`). This is the one piece this module used to build itself internally — now
+ *   supplied by the caller, which is what lets a single implementation serve both apps' different
+ *   widget-hosting machinery.
  */
-export function openWidgetPopover({ hostWidget, popoverWidgetId, contextDecl, eventBus }) {
-  const popoverDef = WidgetRegistry.getDefinition(popoverWidgetId);
+export function openWidgetPopover({ hostWidget, popoverWidgetId, contextDecl, findPopoverDef, createPopoverInstance }) {
+  const popoverDef = findPopoverDef(popoverWidgetId);
   if (!popoverDef) {
     console.warn(`[WidgetPopoverModal] Unknown popover widget id: ${popoverWidgetId}`);
     return;
@@ -70,11 +103,10 @@ export function openWidgetPopover({ hostWidget, popoverWidgetId, contextDecl, ev
     font-family: 'Chakra Petch', sans-serif;
   `;
 
-  // Theme-aware via CSS custom properties (main.css redefines these per
-  // [data-theme], same tokens CompositeWidget.js's own outer-container
-  // fallback uses) rather than literal hex — this chrome belongs to the
-  // modal itself, not the popover definition, so it has no style.* of its
-  // own to derive from and previously stayed hardcoded dark in light mode.
+  // Theme-aware via CSS custom properties (each app's own main/studio.css redefines
+  // these per [data-theme]) rather than literal hex — this chrome belongs to the
+  // modal itself, not the popover definition, so it has no style.* of its own to
+  // derive from.
   const card = document.createElement('div');
   card.style.cssText = `
     background: var(--card-bg, #0d131f);
@@ -91,30 +123,31 @@ export function openWidgetPopover({ hostWidget, popoverWidgetId, contextDecl, ev
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
-  // FDWS v1.12: popoverContext is passed in via config (not assigned after
-  // construction) so CompositeWidget's constructor has it available BEFORE
-  // initLocalState() runs — required for state[].seedFromContext (§1.1) to
-  // resolve a seeded initial value instead of always falling back to default.
-  const popoverInstance = new CompositeWidget(
-    { id: `${popoverWidgetId}__popover`, type: popoverWidgetId, config: { definition: popoverDef, popoverContext: contextSnapshot } },
-    eventBus
-  );
-  popoverInstance.onCommitToHost = (contextKey, value) => {
-    const entry = contextSnapshot[contextKey];
-    if (!entry || !entry.writable) {
-      console.warn(`[WidgetPopoverModal] Rejected commitToHost for undeclared/non-writable contextKey "${contextKey}"`);
-      return;
-    }
-    writeStateRef(hostWidget, entry.stateRef, value);
-  };
-
+  // Declared before `instance` is assigned (rather than assigning `onClosePopover` onto
+  // the instance after the fact) since the instance itself is what needs to be created
+  // with this callback already in hand — `let` avoids a TDZ error if a factory were ever
+  // to invoke onClosePopover synchronously during construction (none do today).
+  let instance;
   const close = () => {
-    popoverInstance.destroy();
+    try { instance?.destroy?.(); } catch (_) { /* already torn down */ }
     overlay.remove();
     activePopover = null;
     document.removeEventListener('keydown', onKeyDown);
   };
-  popoverInstance.onClosePopover = close;
+
+  instance = createPopoverInstance({
+    popoverDef,
+    contextSnapshot,
+    onCommitToHost: (contextKey, value) => {
+      const entry = contextSnapshot[contextKey];
+      if (!entry || !entry.writable) {
+        console.warn(`[WidgetPopoverModal] Rejected commitToHost for undeclared/non-writable contextKey "${contextKey}"`);
+        return;
+      }
+      writeStateRef(hostWidget, entry.stateRef, value);
+    },
+    onClosePopover: () => close()
+  });
 
   function onKeyDown(e) {
     if (e.key === 'Escape') close();
@@ -125,14 +158,14 @@ export function openWidgetPopover({ hostWidget, popoverWidgetId, contextDecl, ev
     if (e.target === overlay) close();
   });
 
-  popoverInstance.mount(card);
-  activePopover = { overlay, instance: popoverInstance };
+  instance.mount(card);
+  activePopover = { overlay, instance };
 }
 
 export function closeWidgetPopover() {
   document.getElementById('fd-widget-popover-modal')?.remove();
   if (activePopover) {
-    try { activePopover.instance.destroy(); } catch (_) { /* already torn down */ }
+    try { activePopover.instance.destroy?.(); } catch (_) { /* already torn down */ }
     activePopover = null;
   }
 }

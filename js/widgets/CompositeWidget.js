@@ -506,8 +506,32 @@ export class CompositeWidget extends BaseWidget {
       // FDWS v1.3 Widget Popovers: opens a `kind:"popover"` widget definition in a
       // modal, feeding it a read-only $context snapshot resolved from this (host)
       // widget's own state via action.context's stateRef paths.
+      //
+      // Rotary Component rebuild, ticket 00: WidgetPopoverModal.js (now shared) no
+      // longer constructs the popover's rendering host itself — it's injected here as
+      // `createPopoverInstance`. A real CompositeWidget already satisfies the
+      // `{mount(container), destroy()}` shape the shared module expects natively, so
+      // this factory just constructs one around the resolved popover definition and
+      // wires its commit/close callbacks, exactly as this file's own constructor/
+      // destroy already do for any other CompositeWidget instance.
       openWidgetPopover: ({ hostWidget, popoverWidgetId, contextDecl }) => openWidgetPopover({
-        hostWidget, popoverWidgetId, contextDecl, eventBus: this.eventBus
+        hostWidget,
+        popoverWidgetId,
+        contextDecl,
+        findPopoverDef: (id) => WidgetRegistry.getDefinition(id),
+        createPopoverInstance: ({ popoverDef, contextSnapshot, onCommitToHost, onClosePopover }) => {
+          // FDWS v1.12 §1.1: popoverContext is passed in via config (not assigned after
+          // construction) so the constructor has it available BEFORE initLocalState()
+          // runs — required for state[].seedFromContext (§1.1) to resolve a seeded
+          // initial value instead of always falling back to default.
+          const popoverInstance = new CompositeWidget(
+            { id: `${popoverWidgetId}__popover`, type: popoverWidgetId, config: { definition: popoverDef, popoverContext: contextSnapshot } },
+            this.eventBus
+          );
+          popoverInstance.onCommitToHost = onCommitToHost;
+          popoverInstance.onClosePopover = onClosePopover;
+          return popoverInstance;
+        }
       }),
       // FDWS v1.3: only meaningful when WidgetPopoverModal has set these on a
       // popover-instance host — read fresh on every call (not cached) since they're
