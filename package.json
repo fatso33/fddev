@@ -9,7 +9,8 @@
     "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "vitest": "^3.2.4",
-    "@playwright/test": "^1.55.0"
+    "@playwright/test": "^1.55.0",
+    "jsdom": "^30.0.1",
+    "vitest": "^3.2.4"
   }
 }
