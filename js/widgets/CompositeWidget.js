@@ -14,6 +14,12 @@ import { runInteraction } from './components/InteractionDispatcher.js';
 import { notifyBindingDependents } from './components/BindingReactivity.js';
 import { resolveThemedColor, resolveThemedBackground } from './components/ThemeColor.js';
 
+// FDWS v1.30 (Rotary rebuild, ticket 02): the rate requestFastPoll() asks for. Only
+// has to clear PC Bridge's FAST_TIER_THRESHOLD_HZ (2) — above that, pollFrequencyHz is
+// a coarse "put this var in the fast chunk pool" selector, not a literal target Hz
+// (SimConnect has no arbitrary-Hz period; see server.js's subscribeDynamicSimVar()).
+const FAST_POLL_HZ = 30;
+
 export class CompositeWidget extends BaseWidget {
   constructor(instanceConfig, eventBus) {
     super(instanceConfig, eventBus);
@@ -448,6 +454,80 @@ export class CompositeWidget extends BaseWidget {
         this.unsubscribers.push(unsub);
       }
     });
+  }
+
+  /**
+   * FDWS v1.30 (Rotary rebuild, ticket 02): the ACTUAL poll period of a component's
+   * readable binding, in milliseconds — what core.rotary's engine derives its
+   * Reconciliation timeout from instead of a hardcoded constant.
+   *
+   * "Actual" includes any fast-tier boost currently held via requestFastPoll() below:
+   * a knob being turned is on the fast tier, so its released value settles in a
+   * fraction of the ~2s a normal-tier (1Hz) binding would imply.
+   * @param {object} compDef
+   * @returns {number} milliseconds
+   */
+  getPollPeriodMs(compDef) {
+    const hz = this.fastPollHolders?.get(compDef?.id)
+      ? FAST_POLL_HZ
+      : (Number(compDef?.binding?.pollFrequencyHz) || 1);
+    return 1000 / hz;
+  }
+
+  /**
+   * FDWS v1.30 (Rotary rebuild, ticket 02): asks for this component's readable
+   * binding to be polled at the fast tier for as long as the returned release
+   * function hasn't been called — used by core.rotary while a knob is engaged.
+   *
+   * Implemented as a second ref-counted subscription on the same SimVar rather than a
+   * bespoke channel: EventBus.subscribeSimVar() already promotes an existing
+   * normal-tier entry when a later subscriber asks for a higher rate, and PC Bridge's
+   * subscribeDynamicSimVar() already promotes the var into the fast chunk pool on
+   * exactly that re-subscribe. Deadband 0, so nothing is filtered out of the faster
+   * stream while the user is actually watching the knob move.
+   *
+   * VERIFIED, ticket 02's "verify and record" item: the release path decrements the
+   * ref-count and drops this extra listener, but it does NOT restore the normal tier.
+   * Neither layer supports demotion — EventBus keeps `entry.pollFrequencyHz` as a
+   * running max and only re-notifies the bridge on a promotion, and PC Bridge's
+   * server.js documents that a SimConnect data definition cannot drop a field once
+   * added, so a true migration back is impossible there. Per the ticket this is an
+   * accepted fallback, not a blocker: the var stays on the fast tier for the session,
+   * which costs bandwidth, not correctness. See tests/RotaryPollTier.test.js.
+   * @param {object} compDef
+   * @returns {(() => void)|null} release function, or null if there's nothing to boost
+   */
+  requestFastPoll(compDef) {
+    const binding = compDef?.binding || {};
+    if (!binding.readSimVar) return null;
+    const templatedVar = this.applyInstanceParams(binding.readSimVar, compDef.instanceParams);
+    const cleanVar = SecurityValidator.sanitizeSimVar(templatedVar);
+    if (!cleanVar) return null;
+
+    if (!this.fastPollHolders) this.fastPollHolders = new Map();
+    const unsub = this.eventBus.subscribeSimVar(
+      cleanVar,
+      binding.unit || 'Number',
+      (val) => {
+        this.onComponentTelemetry(compDef.id, cleanVar, val);
+      },
+      0,
+      FAST_POLL_HZ,
+      binding.pollGroup || this.definition.id
+    );
+    this.fastPollHolders.set(compDef.id, (this.fastPollHolders.get(compDef.id) || 0) + 1);
+
+    let released = false;
+    return () => {
+      // Idempotent: a double release (pointerup racing pointercancel) must not
+      // decrement someone else's hold on the same component.
+      if (released) return;
+      released = true;
+      unsub();
+      const remaining = (this.fastPollHolders.get(compDef.id) || 1) - 1;
+      if (remaining > 0) this.fastPollHolders.set(compDef.id, remaining);
+      else this.fastPollHolders.delete(compDef.id);
+    };
   }
 
   /**

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Rotary Component harness</title>
+  <!--
+    Minimal mount point for the real core.rotary renderer (Rotary rebuild, ticket 02).
+
+    The Rotary's confirmed seam is its rendered public behaviour — the events it emits,
+    the value it writes, and what it does to the pointer — so these tests drive the real
+    component with real browser pointer events rather than a jsdom approximation
+    (setPointerCapture and touch-action have no faithful jsdom equivalent).
+
+    Deliberately NOT the full app: no bridge, no WidgetRegistry, no Shadow DOM host.
+    The component only ever talks to its host through a handful of methods, so the
+    fake host below is that whole contract, which also makes "which host methods does
+    the component actually require?" an explicit, asserted thing.
+  -->
+  <link rel="stylesheet" href="/css/widgets.css">
+  <style>
+    html, body { margin: 0; background: #0b1220; }
+    /* The Author's layout box. The Component must size itself to THIS, not to a
+       fixed pixel size of its own — see the "sizes to its layout space" test. */
+    #box { position: absolute; left: 50px; top: 50px; width: 240px; height: 240px; display: grid; }
+  </style>
+</head>
+<body>
+  <div id="box"></div>
+  <script type="module">
+    import { RotaryComponent } from '/js/widgets/components/RotaryComponent.js';
+
+    const capture = { taken: [], released: [] };
+    const realSet = Element.prototype.setPointerCapture;
+    const realRelease = Element.prototype.releasePointerCapture;
+    Element.prototype.setPointerCapture = function (id) {
+      capture.taken.push(id);
+      return realSet.call(this, id);
+    };
+    Element.prototype.releasePointerCapture = function (id) {
+      capture.released.push(id);
+      try { return realRelease.call(this, id); } catch { /* already released */ }
+    };
+
+    const fd = {
+      log: [],
+      dispatched: [],
+      capture,
+      fastPollRequests: 0,
+      fastPollReleases: 0,
+      renderer: null
+    };
+    window.__fd = fd;
+
+    /**
+     * @param {object} def - the component definition under test
+     * @param {object} [opts]
+     *   pollPeriodMs   - what the host reports as the binding's ACTUAL poll period
+     *   dispatchOk     - false to simulate a dispatch failure
+     *   omitHostExtras - true to drop the poll-period/fast-tier host methods entirely
+     *                    (what Widget Studio's preview host looks like today)
+     */
+    window.__mountRotary = (def, opts = {}) => {
+      const box = document.getElementById('box');
+      box.innerHTML = '';
+      fd.log.length = 0;
+      fd.dispatched.length = 0;
+      capture.taken.length = 0;
+      capture.released.length = 0;
+      fd.fastPollRequests = 0;
+      fd.fastPollReleases = 0;
+
+      const host = {
+        handleInteraction(compDef, trigger, payload) {
+          fd.log.push({ trigger, payload });
+        },
+        dispatchSimEvent(event, value) {
+          fd.dispatched.push({ event, value });
+          return opts.dispatchOk === false ? false : true;
+        },
+        getPreviewTheme: () => 'dark',
+        getThemeConfig: () => ({ baseTheme: 'dark', themeMode: 'auto' }),
+        resolveAssetUrl: () => null,
+        getLocalState: () => undefined,
+        setLocalState: () => {},
+        getAllStateObject: () => ({})
+      };
+      if (!opts.omitHostExtras) {
+        host.getPollPeriodMs = () => (opts.pollPeriodMs ?? 1000);
+        host.requestFastPoll = () => {
+          fd.fastPollRequests++;
+          return () => { fd.fastPollReleases++; };
+        };
+      }
+
+      const renderer = new RotaryComponent(def, host);
+      fd.renderer = renderer;
+      box.appendChild(renderer.render());
+      return true;
+    };
+
+    /** Current indicator rotation, in degrees, read back off the rendered markup. */
+    window.__faceAngle = () => {
+      const line = document.querySelector('[data-face-group="indicator"]');
+      const m = line && line.getAttribute('transform').match(/rotate\((-?[\d.]+)/);
+      return m ? Number(m[1]) : null;
+    };
+
+    window.__faceRect = () => document.querySelector('.fd-rotary-face').getBoundingClientRect().toJSON();
+    window.__boxRect = () => document.getElementById('box').getBoundingClientRect().toJSON();
+    window.__pushTelemetry = (value) => { fd.renderer.update(value, {}); };
+    window.__triggers = () => fd.log.map((e) => e.trigger);
+  </script>
+</body>
+</html>

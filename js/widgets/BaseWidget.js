@@ -332,12 +332,19 @@ export class BaseWidget {
 
   /**
    * Dispatches dynamic SimEvent over EventBus
+   *
+   * FDWS v1.30 (Rotary rebuild, ticket 02): reports whether the event actually went
+   * out. This used to return undefined either way, so a caller had no way to tell a
+   * sent event from one silently dropped on a rejected name. core.rotary feeds a
+   * `false` back into its engine as a dispatch failure, which reverts the knob to
+   * telemetry instead of leaving it showing a value the sim never applied.
    * @param {string} eventName
    * @param {number|string} value
+   * @returns {boolean} true if published, false if the event name was rejected
    */
   dispatchSimEvent(eventName, value = 0) {
     const cleanEvent = SecurityValidator.sanitizeEventName(eventName);
-    if (!cleanEvent) return;
+    if (!cleanEvent) return false;
 
     this.eventBus.publish('SIM_EVENT_DISPATCH', {
       event: cleanEvent,
@@ -345,6 +352,7 @@ export class BaseWidget {
       sourceId: this.id,
       category: this.config.binding?.eventCategory || 'K_EVENT'
     });
+    return true;
   }
 
   /**
