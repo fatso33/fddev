@@ -531,6 +531,47 @@ export class CompositeWidget extends BaseWidget {
   }
 
   /**
+   * FDWS v1.30 (Rotary rebuild, ticket 02 correction): calls `callback` whenever PC
+   * Bridge reports that a write for THIS component's own write event failed.
+   *
+   * SIM_EVENT_DISPATCH_FAILED was already on the wire and already published on the
+   * EventBus by SimBridge — but app.js only ever turned it into a toast, so no
+   * component could react to it. A Rotary needs to: ticket 01's spec requires a
+   * dispatch failure to revert the knob to telemetry, and a write rejected by the
+   * server (unmapped Deck Event, SimConnect refused it) is a dispatch failure that
+   * `dispatchSimEvent()`'s synchronous return can never see — it happens after the
+   * send, on the PC. Filtered to this component's own event, so one failing knob
+   * doesn't revert every other one in the widget.
+   *
+   * Note the broadcast is throttled server-side (server.js's
+   * BINDING_ERROR_BROADCAST_THROTTLE_MS): a held/repeating write that keeps failing
+   * reports once per throttle window, not once per attempt. That is fine for a
+   * revert, which is idempotent.
+   * @param {object} compDef
+   * @param {(packet: object) => void} callback
+   * @returns {(() => void)|null} unsubscribe, or null if there is nothing to watch
+   */
+  onDispatchFailure(compDef, callback) {
+    if (typeof callback !== 'function') return null;
+    const writeEvent = compDef?.binding?.writeEvent;
+    if (!writeEvent) return null;
+    // Both spellings are matched because the component that DISPATCHES may or may not
+    // have templated its own event name first — the failure packet echoes back
+    // whatever was actually sent.
+    const wanted = new Set(
+      [writeEvent, this.applyInstanceParams(writeEvent, compDef.instanceParams)]
+        .map((name) => SecurityValidator.sanitizeEventName(name))
+        .filter(Boolean)
+    );
+    if (wanted.size === 0) return null;
+
+    return this.eventBus.subscribe('SIM_EVENT_DISPATCH_FAILED', (packet) => {
+      const failed = SecurityValidator.sanitizeEventName(packet?.event || packet?.name);
+      if (failed && wanted.has(failed)) callback(packet);
+    });
+  }
+
+  /**
    * Distributes telemetry update to subscribed components
    * @param {string} compId
    * @param {string} simVar

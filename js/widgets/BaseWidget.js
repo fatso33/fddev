@@ -338,21 +338,31 @@ export class BaseWidget {
    * sent event from one silently dropped on a rejected name. core.rotary feeds a
    * `false` back into its engine as a dispatch failure, which reverts the knob to
    * telemetry instead of leaving it showing a value the sim never applied.
+   *
+   * Ticket 02 correction: a rejected NAME was the only failure this reported, which
+   * is a purely local, synchronous check — an event sent while PC Bridge was down
+   * still read as success, and the live test (bridge killed mid-turn) left the knob
+   * parked on a value the sim never took. The EventBus forward now reports whether
+   * the bridge actually accepted the event, and that is covered here too. The
+   * remaining failure mode — accepted by the socket, then rejected server-side — can
+   * only be reported asynchronously, and arrives as SIM_EVENT_DISPATCH_FAILED (see
+   * CompositeWidget.onDispatchFailure()).
    * @param {string} eventName
    * @param {number|string} value
-   * @returns {boolean} true if published, false if the event name was rejected
+   * @returns {boolean} true if published AND handed to the bridge; false if the event
+   *   name was rejected or the bridge could not take it
    */
   dispatchSimEvent(eventName, value = 0) {
     const cleanEvent = SecurityValidator.sanitizeEventName(eventName);
     if (!cleanEvent) return false;
 
-    this.eventBus.publish('SIM_EVENT_DISPATCH', {
+    const forwarded = this.eventBus.publish('SIM_EVENT_DISPATCH', {
       event: cleanEvent,
       value,
       sourceId: this.id,
       category: this.config.binding?.eventCategory || 'K_EVENT'
     });
-    return true;
+    return forwarded !== false;
   }
 
   /**

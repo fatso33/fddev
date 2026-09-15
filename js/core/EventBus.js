@@ -60,8 +60,16 @@ export class EventBus {
 
   /**
    * Publishes message to topic subscribers
+   *
+   * FDWS v1.30 (Rotary rebuild, ticket 02 correction): returns whether the message
+   * was actually delivered. This is only ever meaningful for SIM_EVENT_DISPATCH,
+   * whose auto-forward below is the one publish path with a transport that can
+   * refuse — every other topic is local fan-out and always returns true. Callers
+   * that don't care can keep ignoring the return value.
    * @param {string} topic
    * @param {any} data
+   * @returns {boolean} false only when a SIM_EVENT_DISPATCH could not be handed to
+   *   the bridge (socket closed / PC Bridge not running)
    */
   publish(topic, data) {
     const listeners = this.topics.get(topic);
@@ -76,12 +84,17 @@ export class EventBus {
     }
 
     // Auto-forward SimEvent dispatch to bridge
+    let forwarded = true;
     if (topic === 'SIM_EVENT_DISPATCH' && this.bridgeClient && data) {
       const sanitizedEvent = SecurityValidator.sanitizeEventName(data.event || data.name);
       if (sanitizedEvent) {
-        this.bridgeClient.sendEvent(sanitizedEvent, data.value, data.category);
+        // `!== false` deliberately, not a truthiness test: a bridge stub without a
+        // sendEvent() (several tests, and Studio's mock host) must keep reading as
+        // "sent", since it has no transport that could have refused.
+        forwarded = this.bridgeClient.sendEvent?.(sanitizedEvent, data.value, data.category) !== false;
       }
     }
+    return forwarded;
   }
 
   /**
