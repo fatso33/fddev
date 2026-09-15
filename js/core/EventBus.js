@@ -119,8 +119,10 @@ export class EventBus {
    *   tier on exactly that kind of re-subscribe (see its doc comment), so
    *   this is what actually triggers that promotion; a later subscriber
    *   asking for the *same or lower* rate than what's already been sent
-   *   doesn't re-notify, since PC Bridge already has what it needs and there
-   *   is no demotion. `entry.pollFrequencyHz` tracks the max across all
+   *   doesn't re-notify, since PC Bridge already has what it needs — a
+   *   *subscribe*-time request never demotes, only `unsubscribeSimVar()`'s
+   *   recompute does (FDWS v1.30 ticket 01), since only a departure can ever
+   *   lower the true max. `entry.pollFrequencyHz` tracks the max across all
    *   current listeners either way, so a reconnect resync
    *   (`getActiveSchemaManifest()`) always requests the fastest tier any
    *   current listener needs, even after listeners have come and gone.
@@ -161,7 +163,10 @@ export class EventBus {
     }
 
     entry.refCount++;
-    entry.listeners.set(callback, { deadband: Number(deadband) || 0, lastVal: undefined });
+    // pollFrequencyHz is recorded per-listener (not just on the entry) so
+    // unsubscribeSimVar() can recompute the entry's true max once this
+    // listener is gone — see that method's doc comment.
+    entry.listeners.set(callback, { deadband: Number(deadband) || 0, lastVal: undefined, pollFrequencyHz: requestedHz });
 
     return () => {
       this.unsubscribeSimVar(cleanVar, callback);
@@ -211,7 +216,17 @@ export class EventBus {
   }
 
   /**
-   * Decrements SimVar subscription ref-count
+   * Decrements SimVar subscription ref-count.
+   *
+   * FDWS v1.30 ticket 01: when a subscriber leaves and others remain, the
+   * effective rate is recomputed from whoever's left rather than staying
+   * pinned at the high-water mark a departed fast-tier subscriber set. This
+   * is what lets a Rotary's fast-poll request (CompositeWidget.requestFastPoll())
+   * actually let go of the fast tier on release instead of the promotion
+   * being permanent for the session. Only a genuine drop notifies the bridge
+   * (`allowDemote: true`) — the recomputed max can never come out higher than
+   * it was, so this path is downgrade-only; a same-or-higher recompute is a
+   * no-op, same as before this ticket.
    * @param {string} simVarName
    * @param {Function} callback
    */
@@ -228,6 +243,18 @@ export class EventBus {
       this.simVarSubscriptions.delete(simVarName);
       if (this.bridgeClient) {
         this.bridgeClient.unregisterSimVar(simVarName);
+      }
+      return;
+    }
+
+    let recomputedHz = 1;
+    entry.listeners.forEach((meta) => {
+      recomputedHz = Math.max(recomputedHz, meta.pollFrequencyHz || 1);
+    });
+    if (recomputedHz < entry.pollFrequencyHz) {
+      entry.pollFrequencyHz = recomputedHz;
+      if (this.bridgeClient) {
+        this.bridgeClient.subscribeSimVar(simVarName, entry.unit, 0, recomputedHz, entry.groupKey, true);
       }
     }
   }

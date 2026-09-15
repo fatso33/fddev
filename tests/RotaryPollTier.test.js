@@ -6,9 +6,11 @@
  * answered. Both are pure bookkeeping over EventBus, so they're testable without a
  * DOM, a bridge or a sim.
  *
- * The third test here is a deliberate executable record of ticket 02's "verify and
- * record" item: the reference-counted subscription can UPGRADE a SimVar's tier, but
- * there is no downgrade path anywhere in the stack. See its own comment.
+ * FDWS v1.30 ticket 01: the third test here used to be a deliberate executable
+ * record of ticket 02's "verify and record" item ("no downgrade path anywhere in
+ * the stack"). That's now closed — the tests below document the new contract
+ * (downgrade IS supported, only once nothing still wants the fast tier) instead
+ * of deleting the history of why it mattered.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EventBus } from '../js/core/EventBus.js';
@@ -19,7 +21,7 @@ function makeBridge() {
   const calls = [];
   return {
     calls,
-    subscribeSimVar: (simVar, unit, deadband, hz, group) => calls.push({ kind: 'subscribe', simVar, hz, group }),
+    subscribeSimVar: (simVar, unit, deadband, hz, group, allowDemote) => calls.push({ kind: 'subscribe', simVar, hz, group, allowDemote: !!allowDemote }),
     unregisterSimVar: (simVar) => calls.push({ kind: 'unregister', simVar }),
     registerDynamicEvent: () => {},
     subscribeArrayData: () => {}
@@ -38,7 +40,7 @@ describe('EventBus poll-tier ref-counting (what a Rotary\'s fast-tier request ri
 
   it('subscribes the first listener at its declared rate', () => {
     bus.subscribeSimVar('apHdgBugValue', 'Number', () => {}, 0, 1);
-    expect(bridge.calls).toEqual([{ kind: 'subscribe', simVar: 'apHdgBugValue', hz: 1, group: undefined }]);
+    expect(bridge.calls).toEqual([{ kind: 'subscribe', simVar: 'apHdgBugValue', hz: 1, group: undefined, allowDemote: false }]);
   });
 
   it('promotes the var when a later subscriber asks for a faster rate (the Rotary grabbing the knob)', () => {
@@ -47,10 +49,10 @@ describe('EventBus poll-tier ref-counting (what a Rotary\'s fast-tier request ri
 
     bus.subscribeSimVar('apHdgBugValue', 'Number', () => {}, 0, 30);
 
-    expect(bridge.calls).toEqual([{ kind: 'subscribe', simVar: 'apHdgBugValue', hz: 30, group: undefined }]);
+    expect(bridge.calls).toEqual([{ kind: 'subscribe', simVar: 'apHdgBugValue', hz: 30, group: undefined, allowDemote: false }]);
   });
 
-  it('does NOT drop back to the normal tier when the fast-tier subscriber releases (recorded finding, ticket 02)', () => {
+  it('drops back to the normal tier when the fast-tier subscriber releases and nothing else needs it fast (FDWS v1.30 ticket 01)', () => {
     const baseCb = () => {};
     bus.subscribeSimVar('apHdgBugValue', 'Number', baseCb, 0, 1);
     const releaseFast = bus.subscribeSimVar('apHdgBugValue', 'Number', () => {}, 0, 30);
@@ -58,18 +60,63 @@ describe('EventBus poll-tier ref-counting (what a Rotary\'s fast-tier request ri
 
     releaseFast();
 
-    // Nothing is sent to PC Bridge on release: EventBus only re-notifies on a
-    // PROMOTION, and `entry.pollFrequencyHz` is a running max that is never
-    // recomputed downward. PC Bridge could not act on it anyway — server.js's
-    // subscribeDynamicSimVar() documents that a SimConnect data definition cannot
-    // drop a field once added, so there is no demotion at that end either.
-    // Accepted per the ticket: the cost is bandwidth for the session, not correctness.
+    // The bridge is told the recomputed rate, flagged as an authoritative
+    // downgrade (allowDemote) rather than an ordinary subscribe-time ask.
+    expect(bridge.calls).toEqual([
+      { kind: 'subscribe', simVar: 'apHdgBugValue', hz: 1, group: undefined, allowDemote: true }
+    ]);
+    // The base subscription survives, now back at the normal rate.
+    const manifest = bus.getActiveSchemaManifest();
+    expect(manifest.simVars).toEqual([
+      expect.objectContaining({ simVar: 'apHdgBugValue', pollFrequencyHz: 1 })
+    ]);
+  });
+
+  it('stays fast when a fast-tier subscriber remains after another one releases', () => {
+    const baseCb = () => {};
+    bus.subscribeSimVar('apHdgBugValue', 'Number', baseCb, 0, 1);
+    const releaseFastA = bus.subscribeSimVar('apHdgBugValue', 'Number', () => {}, 0, 30);
+    const releaseFastB = bus.subscribeSimVar('apHdgBugValue', 'Number', () => {}, 0, 30);
+    bridge.calls.length = 0;
+
+    releaseFastA();
+
+    // One fast-tier holder is still present, so nothing changes: no downgrade
+    // notification, and the manifest still reports the fast rate.
     expect(bridge.calls).toEqual([]);
-    // The base subscription survives, still at the fast rate.
     const manifest = bus.getActiveSchemaManifest();
     expect(manifest.simVars).toEqual([
       expect.objectContaining({ simVar: 'apHdgBugValue', pollFrequencyHz: 30 })
     ]);
+
+    releaseFastB();
+    // The base (hz 1) listener is still around, so this is a genuine
+    // downgrade — not a full unregister.
+    expect(bridge.calls).toEqual([
+      { kind: 'subscribe', simVar: 'apHdgBugValue', hz: 1, group: undefined, allowDemote: true }
+    ]);
+  });
+
+  it('does not leak subscriptions or duplicate bookkeeping across repeated upgrade/downgrade cycles', () => {
+    for (let i = 0; i < 3; i++) {
+      const releaseFast = bus.subscribeSimVar('apHdgBugValue', 'Number', () => {}, 0, 30);
+      expect(bus.simVarSubscriptions.get('apHdgBugValue').listeners.size).toBe(1);
+      releaseFast();
+      expect(bus.simVarSubscriptions.get('apHdgBugValue')).toBeUndefined();
+    }
+    // Every cycle here was a full unsubscribe (no base subscriber), so PC
+    // Bridge only ever saw plain subscribe/unregister pairs, never a demote.
+    expect(bridge.calls.filter((c) => c.allowDemote)).toEqual([]);
+  });
+
+  it('leaves an existing normal-tier-only subscriber behaving exactly as before', () => {
+    const release = bus.subscribeSimVar('apHdgBugValue', 'Number', () => {}, 0, 1);
+    bridge.calls.length = 0;
+
+    release();
+
+    expect(bridge.calls).toEqual([{ kind: 'unregister', simVar: 'apHdgBugValue' }]);
+    expect(bus.simVarSubscriptions.has('apHdgBugValue')).toBe(false);
   });
 
   it('keeps the base subscription alive when the fast-tier one is released', () => {
@@ -145,6 +192,29 @@ describe('CompositeWidget poll-period / fast-tier host methods', () => {
     // Releasing twice must not double-decrement someone else's subscription.
     release();
     expect(bus.simVarSubscriptions.get('apHdgBugValue').refCount).toBe(before);
+  });
+
+  it('releasing the fast tier tells PC Bridge to demote the var, and a Rotary turned again re-promotes it (FDWS v1.30 ticket 01)', () => {
+    const { widget, bridge } = makeWidget();
+    widget.registerDynamicBindings();
+    bridge.calls.length = 0;
+
+    const release = widget.requestFastPoll(ROTARY);
+    expect(bridge.calls).toHaveLength(1);
+    expect(bridge.calls[0].allowDemote).toBe(false);
+    bridge.calls.length = 0;
+
+    release();
+    expect(bridge.calls).toHaveLength(1);
+    expect(bridge.calls[0]).toMatchObject({ simVar: 'apHdgBugValue', allowDemote: true });
+    expect(bridge.calls[0].hz).toBeLessThanOrEqual(2);
+    bridge.calls.length = 0;
+
+    // Turning it again raises it once more.
+    widget.requestFastPoll(ROTARY);
+    expect(bridge.calls).toHaveLength(1);
+    expect(bridge.calls[0].allowDemote).toBe(false);
+    expect(bridge.calls[0].hz).toBeGreaterThan(2);
   });
 
   it('is a no-op for a component with nothing readable to boost', () => {

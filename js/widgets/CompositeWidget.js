@@ -486,14 +486,14 @@ export class CompositeWidget extends BaseWidget {
    * exactly that re-subscribe. Deadband 0, so nothing is filtered out of the faster
    * stream while the user is actually watching the knob move.
    *
-   * VERIFIED, ticket 02's "verify and record" item: the release path decrements the
-   * ref-count and drops this extra listener, but it does NOT restore the normal tier.
-   * Neither layer supports demotion — EventBus keeps `entry.pollFrequencyHz` as a
-   * running max and only re-notifies the bridge on a promotion, and PC Bridge's
-   * server.js documents that a SimConnect data definition cannot drop a field once
-   * added, so a true migration back is impossible there. Per the ticket this is an
-   * accepted fallback, not a blocker: the var stays on the fast tier for the session,
-   * which costs bandwidth, not correctness. See tests/RotaryPollTier.test.js.
+   * Ticket 02 originally recorded that the release path decremented the ref-count
+   * but did NOT restore the normal tier — the promotion was permanent for the
+   * session. FDWS v1.30 ticket 01 closed that gap: `EventBus.unsubscribeSimVar()`
+   * now recomputes the effective rate from whichever listeners are left once this
+   * one drops, and tells PC Bridge to demote the var back to normal tier when
+   * nothing still needs it fast (and only then — a still-held fast poll on the
+   * same var, or another widget's own fast-tier subscription, keeps it fast).
+   * See tests/RotaryPollTier.test.js.
    * @param {object} compDef
    * @returns {(() => void)|null} release function, or null if there's nothing to boost
    */
