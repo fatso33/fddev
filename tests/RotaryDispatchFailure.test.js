@@ -147,6 +147,49 @@ describe('core.rotary reverts to telemetry when a write never reached the sim', 
     expect(comp.currentValue).toBe(TELEMETRY_VALUE);
   });
 
+  // Both of the following are regressions introduced by the first fix pass and caught
+  // on re-review. They share a root cause: failure was treated as a property of the
+  // GESTURE ("did anything go wrong while turning?") rather than of a specific write.
+  it('does NOT revert when an early write in the turn failed but a later one succeeded', () => {
+    comp.faceNode.dispatchEvent(pointerEvent('pointerdown', pointAt(0)));
+
+    bridge.connected = false;
+    comp.faceNode.dispatchEvent(pointerEvent('pointermove', pointAt(15)));
+
+    // Bridge comes back mid-turn; this write genuinely reaches the sim, and it is the
+    // one the released value corresponds to.
+    bridge.connected = true;
+    comp.faceNode.dispatchEvent(pointerEvent('pointermove', pointAt(30)));
+    comp.faceNode.dispatchEvent(pointerEvent('pointerup', pointAt(30)));
+
+    expect(comp.currentValue).toBeCloseTo(TELEMETRY_VALUE + 30, 0);
+    expect(bridge.sent.at(-1).value).toBeCloseTo(TELEMETRY_VALUE + 30, 0);
+  });
+
+  it('retries a value whose previous write failed, instead of answering from the dedup cache', () => {
+    // Fail a write to a specific value, so the repeat-skip cache holds it as failed.
+    bridge.connected = false;
+    turn(comp, 30);
+    expect(comp.currentValue).toBe(TELEMETRY_VALUE);
+
+    // Bridge recovers and the user turns back to that SAME value. It must actually be
+    // re-dispatched: answering "failed" from the cache left the knob unable to reach
+    // that one value at all until some other value had been dispatched first.
+    bridge.connected = true;
+    turn(comp, 30);
+
+    expect(bridge.sent.map((s) => Math.round(s.value))).toContain(TELEMETRY_VALUE + 30);
+    expect(comp.currentValue).toBeCloseTo(TELEMETRY_VALUE + 30, 0);
+  });
+
+  it('still skips a repeat write of a value that already went out successfully', () => {
+    // The dedup the cache exists for: turnEnd re-committing the last turn frame's
+    // value must not double-dispatch it.
+    turn(comp, 30);
+    const sentForFinalValue = bridge.sent.filter((s) => Math.round(s.value) === TELEMETRY_VALUE + 30);
+    expect(sentForFinalValue.length).toBe(1);
+  });
+
   it('ignores a reported failure for a different component\'s write event', () => {
     turn(comp, 30);
     bus.publish('SIM_EVENT_DISPATCH_FAILED', { event: 'apAltSet', reason: 'no mapping' });

@@ -92,6 +92,12 @@ export class EventBus {
         // sendEvent() (several tests, and Studio's mock host) must keep reading as
         // "sent", since it has no transport that could have refused.
         forwarded = this.bridgeClient.sendEvent?.(sanitizedEvent, data.value, data.category) !== false;
+      } else {
+        // Rejected here and nothing was sent, so this must not report "sent" either.
+        // BaseWidget.dispatchSimEvent() pre-checks the name and never reaches this
+        // branch — but WidgetSandbox.js and VirtualYokeEngine.js publish
+        // SIM_EVENT_DISPATCH directly, and they do reach it.
+        forwarded = false;
       }
     }
     return forwarded;

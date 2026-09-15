@@ -55,6 +55,16 @@ describe('CompositeWidget.dispatchSimEvent result', () => {
     expect(widget.dispatchSimEvent('apHdgSet', 180)).toBe(true);
   });
 
+  // WidgetSandbox.js and VirtualYokeEngine.js publish SIM_EVENT_DISPATCH directly,
+  // bypassing dispatchSimEvent()'s pre-check, so publish()'s own answer has to be
+  // right for a name that is rejected inside it. (Neither caller reads the result
+  // yet — see the report's follow-up note.)
+  it('publish() reports failure for an event name rejected inside the forward itself', () => {
+    const { bus } = makeWidget({ sendEvent: () => true });
+    expect(bus.publish('SIM_EVENT_DISPATCH', { event: '', value: 1 })).toBe(false);
+    expect(bus.publish('SIM_EVENT_DISPATCH', { event: 'apHdgSet', value: 1 })).toBe(true);
+  });
+
   it('treats a bridge stub with no sendEvent() as sent, rather than as a failure', () => {
     // Several existing bridge fakes (and Studio's mock host) have no transport at all;
     // "no transport" must not read as "the transport refused".
