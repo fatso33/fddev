@@ -285,6 +285,84 @@ test('a Rotary carrying only the deleted props still renders and turns, degradin
   expect(errors).toEqual([]);
 });
 
+// Ticket 03 (Scrub and Tap gestures). The decision layer's per-gesture behaviour is
+// exhaustively unit-tested in shared/rotaryEngine.test.js — these only confirm the
+// Component wires REAL pointer events into it correctly and shows the right cursor
+// affordance, same division of labour as the Arc tests above.
+
+test('defaults to the Arc cursor affordance when props.gesture is unset', async ({ page }) => {
+  await mount(page);
+  const cursor = await page.evaluate(() => getComputedStyle(document.querySelector('.fd-rotary-face')).cursor);
+  expect(cursor).toBe('grab');
+  expect(await page.evaluate(() => document.querySelector('.fd-rotary-face').dataset.gesture)).toBe('arc');
+});
+
+test('Scrub: a vertical drag turns the knob like a wheel, and shows the scrub cursor affordance', async ({ page }) => {
+  const scrubDef = { ...DEF, props: { ...DEF.props, gesture: 'scrub', degreesPerUnit: 2 } };
+  await mount(page, scrubDef);
+  await page.evaluate(() => window.__pushTelemetry(50));
+
+  expect(await page.evaluate(() => document.querySelector('.fd-rotary-face').dataset.gesture)).toBe('scrub');
+  const cursor = await page.evaluate(() => getComputedStyle(document.querySelector('.fd-rotary-face')).cursor);
+  expect(cursor).toBe('ns-resize');
+
+  // Drag straight up from center by 60px, at 2px/unit — the value should have
+  // increased by roughly 30 units.
+  await page.mouse.move(CENTER.x, CENTER.y);
+  await page.mouse.down();
+  for (const dy of [10, 20, 30, 40, 50, 60]) {
+    await page.mouse.move(CENTER.x, CENTER.y - dy);
+  }
+  await page.mouse.up();
+
+  const triggers = await page.evaluate(() => window.__triggers());
+  expect(triggers[0]).toBe('turnStart');
+  expect(triggers[triggers.length - 1]).toBe('turnEnd');
+  expect(triggers.filter((t) => t === 'turn').length).toBeGreaterThan(0);
+
+  const dispatched = await page.evaluate(() => window.__fd.dispatched);
+  expect(dispatched.length).toBeGreaterThan(0);
+  const finalValue = dispatched[dispatched.length - 1].value;
+  expect(finalValue).toBeGreaterThan(65);
+  expect(finalValue).toBeLessThan(95);
+});
+
+test('Tap: a tap with no drag changes the value by one step, in the direction of the tapped side', async ({ page }) => {
+  const tapDef = { ...DEF, props: { ...DEF.props, gesture: 'tap', degreesPerUnit: 5 } };
+  await mount(page, tapDef);
+  await page.evaluate(() => window.__pushTelemetry(50));
+
+  expect(await page.evaluate(() => document.querySelector('.fd-rotary-face').dataset.gesture)).toBe('tap');
+  const cursor = await page.evaluate(() => getComputedStyle(document.querySelector('.fd-rotary-face')).cursor);
+  expect(cursor).toBe('pointer');
+
+  // Tap the right half of the knob (positive dx from center) — increment side.
+  // No intermediate mouse.move between down and up: "no drag required".
+  await page.mouse.move(CENTER.x + 60, CENTER.y);
+  await page.mouse.down();
+  await page.mouse.up();
+
+  const triggers = await page.evaluate(() => window.__triggers());
+  expect(triggers).toEqual(['turnStart', 'turn', 'turnEnd']);
+
+  const dispatched = await page.evaluate(() => window.__fd.dispatched);
+  expect(dispatched.length).toBeGreaterThan(0);
+  expect(dispatched[dispatched.length - 1].value).toBe(55);
+});
+
+test('Tap: tapping the left half decrements instead', async ({ page }) => {
+  const tapDef = { ...DEF, props: { ...DEF.props, gesture: 'tap', degreesPerUnit: 5 } };
+  await mount(page, tapDef);
+  await page.evaluate(() => window.__pushTelemetry(50));
+
+  await page.mouse.move(CENTER.x - 60, CENTER.y);
+  await page.mouse.down();
+  await page.mouse.up();
+
+  const dispatched = await page.evaluate(() => window.__fd.dispatched);
+  expect(dispatched[dispatched.length - 1].value).toBe(45);
+});
+
 test('destroying the Component mid-turn releases its fast-tier hold', async ({ page }) => {
   // A widget removed (or re-rendered) while the knob is held would otherwise leave a
   // live subscription behind for the rest of the session, holding the SimVar on the
