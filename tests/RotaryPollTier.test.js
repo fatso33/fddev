@@ -98,15 +98,56 @@ describe('EventBus poll-tier ref-counting (what a Rotary\'s fast-tier request ri
   });
 
   it('does not leak subscriptions or duplicate bookkeeping across repeated upgrade/downgrade cycles', () => {
+    // Code review correction: the original version of this test had no base
+    // (hz 1) subscriber, so every "cycle" was a full subscribe/unsubscribe —
+    // its own assertion that no `allowDemote` calls ever happened proved
+    // that, and meant it never actually exercised a promote-then-demote
+    // cycle at all. A persistent base subscriber is what makes each cycle a
+    // genuine one (the entry survives the fast listener's release).
+    const baseCb = () => {};
+    bus.subscribeSimVar('apHdgBugValue', 'Number', baseCb, 0, 1);
+    bridge.calls.length = 0;
+
     for (let i = 0; i < 3; i++) {
       const releaseFast = bus.subscribeSimVar('apHdgBugValue', 'Number', () => {}, 0, 30);
-      expect(bus.simVarSubscriptions.get('apHdgBugValue').listeners.size).toBe(1);
+      // Exactly one promote call, no duplicate/leaked listener bookkeeping.
+      expect(bus.simVarSubscriptions.get('apHdgBugValue').listeners.size).toBe(2);
+      expect(bridge.calls.at(-1)).toEqual(
+        { kind: 'subscribe', simVar: 'apHdgBugValue', hz: 30, group: undefined, allowDemote: false }
+      );
+
       releaseFast();
-      expect(bus.simVarSubscriptions.get('apHdgBugValue')).toBeUndefined();
+      // Base listener survives; exactly one demote call.
+      expect(bus.simVarSubscriptions.get('apHdgBugValue').listeners.size).toBe(1);
+      expect(bridge.calls.at(-1)).toEqual(
+        { kind: 'subscribe', simVar: 'apHdgBugValue', hz: 1, group: undefined, allowDemote: true }
+      );
     }
-    // Every cycle here was a full unsubscribe (no base subscriber), so PC
-    // Bridge only ever saw plain subscribe/unregister pairs, never a demote.
-    expect(bridge.calls.filter((c) => c.allowDemote)).toEqual([]);
+
+    // Exactly one promote + one demote per cycle -- three cycles, six calls,
+    // nothing leaked or duplicated across repeats.
+    expect(bridge.calls).toHaveLength(6);
+    expect(bus.simVarSubscriptions.get('apHdgBugValue').refCount).toBe(1);
+  });
+
+  it('demotes on unmount when the LAST listener (with no base subscriber) was the fast one (code review finding 4)', () => {
+    // No base subscriber here: this fast-tier listener is the var's only
+    // one, so releasing it hits the refCount === 0 / full-unsubscribe
+    // branch -- not the multi-listener recompute path the earlier tests
+    // cover. unregisterSimVar() alone is a client-side-only no-op on PC
+    // Bridge, so without an explicit demote here the var would stay pinned
+    // fast for the rest of the session even though nothing is subscribed to
+    // it at all any more.
+    const releaseFast = bus.subscribeSimVar('apHdgBugValue', 'Number', () => {}, 0, 30);
+    bridge.calls.length = 0;
+
+    releaseFast();
+
+    expect(bridge.calls).toEqual([
+      { kind: 'subscribe', simVar: 'apHdgBugValue', hz: 1, group: undefined, allowDemote: true },
+      { kind: 'unregister', simVar: 'apHdgBugValue' }
+    ]);
+    expect(bus.simVarSubscriptions.has('apHdgBugValue')).toBe(false);
   });
 
   it('leaves an existing normal-tier-only subscriber behaving exactly as before', () => {

@@ -227,6 +227,17 @@ export class EventBus {
    * (`allowDemote: true`) — the recomputed max can never come out higher than
    * it was, so this path is downgrade-only; a same-or-higher recompute is a
    * no-op, same as before this ticket.
+   *
+   * Correction (code review): the LAST listener leaving is a release too, not
+   * just the multi-listener recompute case above — if it's the one holding
+   * this var at the fast tier, a demote has to go out before the entry (and
+   * the rate it was pinned at) disappears. `unregisterSimVar()` alone isn't
+   * enough: it's a client-side-only no-op on PC Bridge (see server.js's
+   * `UNREGISTER_SIMVAR` handler), so without this a var whose only ever
+   * subscriber leaves stays pinned fast for the rest of the session with no
+   * way back — a later normal-tier-only resubscribe hits PC Bridge's
+   * `currentTier === 'fast' && !wantsFast` no-op guard and is silently
+   * ignored.
    * @param {string} simVarName
    * @param {Function} callback
    */
@@ -240,6 +251,9 @@ export class EventBus {
     }
 
     if (entry.refCount === 0 || entry.listeners.size === 0) {
+      if (entry.pollFrequencyHz > 1 && this.bridgeClient) {
+        this.bridgeClient.subscribeSimVar(simVarName, entry.unit, 0, 1, entry.groupKey, true);
+      }
       this.simVarSubscriptions.delete(simVarName);
       if (this.bridgeClient) {
         this.bridgeClient.unregisterSimVar(simVarName);
