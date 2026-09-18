@@ -38,6 +38,9 @@ import { RotaryComponent } from '../js/widgets/components/RotaryComponent.js';
 const WRITE_EVENT = 'apHdgSet';
 const TELEMETRY_VALUE = 100;
 const RADIUS = 100;
+// Comfortably wider than the engine's 1000/60 frame quantum (ticket 20), so each
+// resolve() this suite drives lands in its own animation frame — see installFrameClock.
+const ONE_FRAME_MS = 20;
 
 /** getBoundingClientRect() is all-zeros in jsdom, so client coords ARE the offsets
  * from the knob's centre — which is all the gesture wiring passes to the engine. */
@@ -77,6 +80,25 @@ function makeBridge() {
   };
 }
 
+/**
+ * Ticket 20: the engine identifies an animation frame by a QUANTIZED bucket of the
+ * caller-supplied `now` (it used to compare raw `now` for exact equality, which meant
+ * the per-frame write cap never engaged at all). A synchronous test dispatches its
+ * pointer events within the same millisecond, so without this they would all share one
+ * frame budget and only the first move's write would go out.
+ *
+ * Every test here is about what happens to a specific write's OUTCOME, not about the
+ * cap — most sharply 'does NOT revert when an early write failed but a later one
+ * succeeded', which needs its two moves to produce two separate, independently-outcomed
+ * writes. So the Component's clock is spaced one frame per resolve(), which is exactly
+ * what a real finger moving across several animation frames produces. This changes only
+ * how the tests space their timestamps; no assertion is relaxed.
+ */
+function installFrameClock(component) {
+  let t = 1000;
+  component.now = () => (t += ONE_FRAME_MS);
+}
+
 /** grab -> turn `degrees` -> release, as real pointer events on the Face. */
 function turn(comp, degrees) {
   comp.faceNode.dispatchEvent(pointerEvent('pointerdown', pointAt(0)));
@@ -99,6 +121,7 @@ describe('core.rotary reverts to telemetry when a write never reached the sim', 
       bus
     );
     comp = new RotaryComponent(COMP_DEF, widget);
+    installFrameClock(comp);
     document.body.appendChild(comp.render());
     // Last-known telemetry: the value a failed write must fall back to.
     comp.update(TELEMETRY_VALUE, {});
