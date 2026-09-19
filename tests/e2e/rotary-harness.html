@@ -56,6 +56,7 @@
      * @param {object} [opts]
      *   pollPeriodMs   - what the host reports as the binding's ACTUAL poll period
      *   dispatchOk     - false to simulate a dispatch failure
+     *   theme, baseTheme - the theme being rendered and the theme the definition was authored for
      *   omitHostExtras - true to drop the poll-period/fast-tier host methods entirely
      *                    (what Widget Studio's preview host looks like today)
      */
@@ -77,8 +78,8 @@
           fd.dispatched.push({ event, value });
           return opts.dispatchOk === false ? false : true;
         },
-        getPreviewTheme: () => 'dark',
-        getThemeConfig: () => ({ baseTheme: 'dark', themeMode: 'auto' }),
+        getPreviewTheme: () => opts.theme || 'dark',
+        getThemeConfig: () => ({ baseTheme: opts.baseTheme || 'dark', themeMode: 'auto' }),
         resolveAssetUrl: () => null,
         getLocalState: () => undefined,
         setLocalState: () => {},
