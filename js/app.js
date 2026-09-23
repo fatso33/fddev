@@ -25,6 +25,13 @@ import { RotatePrompt } from './ui/RotatePrompt.js';
 import { Profile } from './models/Profile.js';
 import { Page } from './models/Page.js';
 import { SecurityValidator } from './core/SecurityValidator.js';
+import {
+  getCornerWidgetLayouts as calculateCornerWidgetLayouts,
+  getReservedCornerEntries as calculateReservedCornerEntries,
+  resolveWithReservedCorners as calculateWithReservedCorners,
+  resolveDropPlacement as calculateDropPlacement,
+  resolveListWithReservedCorners as calculateListWithReservedCorners,
+} from './services/CornerLayout.js';
 
 export class FlightDeckApp {
   constructor() {
@@ -763,56 +770,7 @@ export class FlightDeckApp {
    * @param {{columns:number}} gridSpec
    */
   getCornerWidgetLayouts(orientation, deviceTier, gridSpec) {
-    const declaredForCols = orientation === 'landscape' ? 44 : 20;
-    const scale = (declaredW) => Math.max(1, Math.min(gridSpec.columns, Math.round((declaredW / declaredForCols) * gridSpec.columns)));
-    // Each widget's grid footprint is 1 column wider than its visible
-    // button/badge (3->4 for the menu, 5->6 for the App Profile badge) --
-    // permanent, always-reserved padding toward the true screen edge, not
-    // conditional on Fullscreen mode. Earlier attempts tried to only pad
-    // when Fullscreen was actually on (first via a :fullscreen CSS
-    // selector, which can't cross this widget's Shadow DOM boundary at
-    // all; then via a JS-toggled class, which worked but needed a curved-
-    // corner cushion size that turned out to vary per device -- correct on
-    // a Pixel 7 Pro, still clipped on a Pixel 10). A static grid-space
-    // margin sidesteps needing to know the device's curvature at all: it's
-    // never enough to be *wrong*, just occasionally more generous than a
-    // given phone strictly needs. (Started at +2 columns; the user found
-    // that a touch too generous on-device and asked for +1 instead.)
-    // visibleCols/totalCols/gap are passed into each widget's config so it
-    // can inner-align its actual button/badge within the wider cell via its
-    // own nested CSS Grid (matching this outer grid's column-width math
-    // exactly) rather than stretching to fill it -- see MenuToggleWidget/
-    // AppProfileWidget.render().
-    const menuVisibleW = scale(3);
-    const menuTotalW = scale(4);
-    const profileVisibleW = scale(5);
-    const profileTotalW = scale(6);
-    return {
-      menu: {
-        id: '__corner_menu__',
-        type: 'MenuToggleWidget',
-        layout: { col: 1, row: 1, w: menuTotalW, h: 2 },
-        config: {
-          removable: false,
-          appEditMode: this.isEditMode,
-          visibleCols: menuVisibleW,
-          totalCols: menuTotalW,
-          gap: gridSpec.gap
-        }
-      },
-      profile: {
-        id: '__corner_profile__',
-        type: 'AppProfileWidget',
-        layout: { col: Math.max(1, gridSpec.columns - profileTotalW + 1), row: 1, w: profileTotalW, h: 2 },
-        config: {
-          removable: false,
-          label: this.activeProfile ? this.activeProfile.name.toUpperCase().slice(0, 7) : 'DEFAULT',
-          visibleCols: profileVisibleW,
-          totalCols: profileTotalW,
-          gap: gridSpec.gap
-        }
-      }
-    };
+    return calculateCornerWidgetLayouts(orientation, deviceTier, gridSpec, this.isEditMode, this.activeProfile);
   }
 
   /**
@@ -827,11 +785,7 @@ export class FlightDeckApp {
    * widgets are app-global, not page content).
    */
   getReservedCornerEntries(orientation, deviceTier, gridSpec) {
-    const { menu, profile } = this.getCornerWidgetLayouts(orientation, deviceTier, gridSpec);
-    return [
-      { id: menu.id, layout: menu.layout },
-      { id: profile.id, layout: profile.layout }
-    ];
+    return calculateReservedCornerEntries(this.getCornerWidgetLayouts(orientation, deviceTier, gridSpec));
   }
 
   /**
@@ -855,11 +809,7 @@ export class FlightDeckApp {
    * @returns {Array<object>} real widgets only, reserved-corner-safe
    */
   resolveWithReservedCorners(movingId, targetLayout, widgetList, reserved) {
-    let list = this.layoutEngine.resolveLayoutWithPushDown(movingId, targetLayout, widgetList);
-    for (const r of reserved) {
-      list = this.layoutEngine.resolveLayoutWithPushDown(r.id, r.layout, [...list, r]);
-    }
-    return list.filter((w) => !reserved.some((res) => res.id === w.id));
+    return calculateWithReservedCorners(this.layoutEngine, movingId, targetLayout, widgetList, reserved);
   }
 
   /**
@@ -880,9 +830,7 @@ export class FlightDeckApp {
    * @returns {{ok:true, widgets:Array<object>}|{ok:false}}
    */
   resolveDropPlacement(movingWidgetId, candidate, widgetList, gridSpec, reserved) {
-    const wouldCollide = this.layoutEngine.hasCollision(candidate, movingWidgetId, [...widgetList, ...reserved]);
-    if (wouldCollide && !this.autoRepositionEnabled) return { ok: false };
-    return this.layoutEngine.resolveSmartNudge(movingWidgetId, candidate, widgetList, gridSpec, reserved);
+    return calculateDropPlacement(this.layoutEngine, this.autoRepositionEnabled, movingWidgetId, candidate, widgetList, gridSpec, reserved);
   }
 
   /**
@@ -898,14 +846,7 @@ export class FlightDeckApp {
    * @returns {Array<object>}
    */
   resolveListWithReservedCorners(items, reserved) {
-    let list = [];
-    for (const item of items) {
-      list = this.layoutEngine.resolveLayoutWithPushDown(item.id, item.layout, [...list, item]);
-    }
-    for (const r of reserved) {
-      list = this.layoutEngine.resolveLayoutWithPushDown(r.id, r.layout, [...list, r]);
-    }
-    return list.filter((w) => !reserved.some((res) => res.id === w.id));
+    return calculateListWithReservedCorners(this.layoutEngine, items, reserved);
   }
 
   /**
@@ -1945,4 +1886,3 @@ if (document.readyState === 'loading') {
 } else {
   startFlightDeck();
 }
-
