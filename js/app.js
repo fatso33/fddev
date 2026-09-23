@@ -24,7 +24,7 @@ import { SettingsView } from './ui/SettingsView.js';
 import { RotatePrompt } from './ui/RotatePrompt.js';
 import { Profile } from './models/Profile.js';
 import { Page } from './models/Page.js';
-import { SecurityValidator } from './core/SecurityValidator.js';
+import { NavigationManager } from './services/NavigationManager.js';
 import {
   getCornerWidgetLayouts as calculateCornerWidgetLayouts,
   getReservedCornerEntries as calculateReservedCornerEntries,
@@ -92,6 +92,7 @@ export class FlightDeckApp {
     this.contentArea = document.getElementById('content-area');
     this.gridContainer = null;
     this.orientationUnsub = null;
+    this.navigation = new NavigationManager(this);
   }
 
   async init() {
@@ -581,27 +582,7 @@ export class FlightDeckApp {
   }
 
   switchPage(pageId) {
-    if (this.isEditMode) {
-      this.handleCancelEdit();
-    }
-    this.activePageId = pageId;
-
-    // Update active state in nav dropdown
-    const menuDropdown = document.getElementById('menu-dropdown');
-    if (menuDropdown) {
-      menuDropdown.querySelectorAll('.menu-item-btn[data-page]').forEach((btn) => {
-        const key = btn.dataset.page;
-        btn.classList.toggle('active', `page_${key}` === pageId);
-      });
-
-      // Hide or disable Customize Dashboard option if on Settings page
-      const editBtn = document.getElementById('menu-edit-mode-btn');
-      if (editBtn) {
-        editBtn.style.display = (pageId === 'page_settings') ? 'none' : 'flex';
-      }
-    }
-
-    this.renderActivePage();
+    return this.navigation.switchPage(pageId);
   }
 
   renderActivePage() {
@@ -1709,42 +1690,7 @@ export class FlightDeckApp {
    * so a user scrolling the menu can't accidentally trigger either action.
    */
   renderPageMenu() {
-    const menuDropdown = document.getElementById('menu-dropdown');
-    if (!menuDropdown || !this.activeProfile) return;
-
-    menuDropdown.querySelectorAll('.menu-item-btn[data-custom-page]').forEach((el) => el.remove());
-
-    const shippedPageIds = new Set(this.storage.getDefaultProfiles()[0].pages.map((p) => p.id));
-    const customPages = this.activeProfile.pages.filter((p) => !shippedPageIds.has(p.id));
-    // Anchor custom pages before "Customize Dashboard" (falling back to
-    // Settings, then the divider) so they stay grouped with the other page
-    // nav buttons rather than landing after the dashboard/settings actions.
-    const anchor = document.getElementById('menu-edit-mode-btn')
-      || menuDropdown.querySelector('.menu-item-btn[data-page="settings"]')
-      || menuDropdown.querySelector('.menu-divider');
-
-    customPages.forEach((page) => {
-      const btn = document.createElement('button');
-      btn.className = 'menu-item-btn';
-      btn.dataset.customPage = page.id;
-      btn.innerHTML = `
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>
-        </svg>
-        ${SecurityValidator.escapeHTML(page.name)}
-      `;
-      btn.addEventListener('click', () => {
-        this.switchPage(page.id);
-        menuDropdown.classList.remove('open');
-      });
-      menuDropdown.insertBefore(btn, anchor);
-    });
-
-    // Refresh the Settings page's page-management list too, in case it's
-    // the currently mounted view (e.g. right after adding/deleting a page).
-    if (this.settingsView && this.activePageId === 'page_settings') {
-      this.settingsView.refreshPagesList();
-    }
+    return this.navigation.renderPageMenu();
   }
 
   /**

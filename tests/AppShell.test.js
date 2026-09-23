@@ -10,6 +10,7 @@ import { SimBridge } from '../js/core/SimBridge.js';
 import { LayoutEngine } from '../js/core/LayoutEngine.js';
 import { VirtualYokeEngine } from '../js/core/VirtualYokeEngine.js';
 import { PwaInstallManager } from '../js/core/PwaInstallManager.js';
+import { NavigationManager } from '../js/services/NavigationManager.js';
 
 let harness;
 beforeEach(async () => { harness = await createAppHarness(); });
@@ -29,7 +30,7 @@ function observeCall(target, method, events, name = method) {
   });
 }
 
-describe('FlightDeckApp shell before extraction', () => {
+describe('FlightDeckApp shell', () => {
   it('exports only the class, suppresses bootstrap with the sentinel, and initializes fields at their original time', () => {
     expect(harness.exportNames).toEqual(['FlightDeckApp']);
     expect(window.flightDeck).toBe(harness.sentinel);
@@ -42,8 +43,9 @@ describe('FlightDeckApp shell before extraction', () => {
       'autoRepositionEnabled', 'historyStack', 'editToolbar', 'widgetDrawer',
       'propertyInspector', 'profileSelector', 'rotatePrompt', 'cornerWidgetInstances',
       'menuToggleWidget', 'appProfileWidget', 'cornerOverlayEl', 'editToolbarVisible',
-      'contentArea', 'gridContainer', 'orientationUnsub',
+      'contentArea', 'gridContainer', 'orientationUnsub', 'navigation',
     ]);
+    expect(app.navigation).toBeInstanceOf(NavigationManager);
     for (const [field, Class] of [
       ['eventBus', EventBus], ['storage', StorageManager], ['simBridge', SimBridge],
       ['layoutEngine', LayoutEngine], ['virtualYoke', VirtualYokeEngine],
