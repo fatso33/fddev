@@ -2,7 +2,24 @@ import { expect, test } from '@playwright/test';
 
 test.use({ serviceWorkers: 'block' });
 
-test('the real shell boots and navigates while all bridge traffic is intercepted', async ({ page }) => {
+async function isolateShell(page) {
+  await page.routeWebSocket('**/*', (socket) => socket.close());
+  await page.route('**/*', (route) => {
+    const url = new URL(route.request().url());
+    if (
+      url.port === '8080' ||
+      url.hostname === 'fonts.googleapis.com' ||
+      url.hostname === 'fonts.gstatic.com'
+    ) {
+      return route.abort();
+    }
+    return route.continue();
+  });
+}
+
+test('the real shell boots and navigates while all bridge traffic is intercepted', async ({
+  page,
+}) => {
   const bridgeAttempts = [];
   await page.routeWebSocket('**/*', (socket) => {
     bridgeAttempts.push(socket.url());
@@ -47,7 +64,11 @@ test('corner menu anchors to its live rect and badge requires a long press', asy
   await page.routeWebSocket('**/*', (socket) => socket.close());
   await page.route('**/*', (route) => {
     const url = new URL(route.request().url());
-    if (url.port === '8080' || url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
+    if (
+      url.port === '8080' ||
+      url.hostname === 'fonts.googleapis.com' ||
+      url.hostname === 'fonts.gstatic.com'
+    ) {
       return route.abort();
     }
     return route.continue();
@@ -74,4 +95,72 @@ test('corner menu anchors to its live rect and badge requires a long press', asy
   await page.waitForTimeout(550);
   await expect(selector).not.toHaveClass(/hidden/);
   await page.mouse.up();
+});
+
+test('height-only resize keeps mounted widget identity and refreshes its square grid', async ({
+  page,
+}) => {
+  await isolateShell(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/index.html');
+  await expect.poll(() => page.evaluate(() => Boolean(window.flightDeck?.activeProfile))).toBe(true);
+  await page.evaluate(() => window.flightDeck.switchPage('page_autopilot'));
+  await expect.poll(() => page.evaluate(() => window.flightDeck.activeWidgetInstances.length)).toBeGreaterThan(0);
+  await expect(page.locator('#content-area .fd-page-grid')).toHaveCount(1);
+  const before = await page.evaluate(() => {
+    const app = window.flightDeck;
+    window.__pageResizeWidget = app.activeWidgetInstances[0].element;
+    window.__pageResizeWidget.dataset.resizePin = 'kept';
+    return app.gridContainer.style.gridAutoRows;
+  });
+  await page.setViewportSize({ width: 390, height: 744 });
+  await expect.poll(() => page.evaluate(() => window.flightDeck.currentDeviceTier)).toBe('mobile');
+  await page.waitForTimeout(120);
+  expect(
+    await page.evaluate(
+      () => window.flightDeck.activeWidgetInstances[0].element === window.__pageResizeWidget,
+    ),
+  ).toBe(true);
+  await expect(page.locator('[data-resize-pin="kept"]')).toHaveCount(1);
+  expect(await page.evaluate(() => window.flightDeck.gridContainer.style.gridAutoRows)).toBe(
+    before,
+  );
+});
+
+test('orientation change rebuilds the page and changes reserved corner spans', async ({ page }) => {
+  await isolateShell(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/index.html');
+  await expect(page.locator('#content-area .fd-page-grid')).toHaveCount(1);
+  const portraitSpan = await page
+    .locator('.fd-reserved-corner-indicator')
+    .last()
+    .evaluate((el) => el.style.gridColumn);
+  await page.evaluate(() => {
+    window.__portraitGrid = window.flightDeck.gridContainer;
+  });
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect
+    .poll(() => page.evaluate(() => window.flightDeck.currentOrientation))
+    .toBe('landscape');
+  expect(await page.evaluate(() => window.flightDeck.gridContainer === window.__portraitGrid)).toBe(
+    false,
+  );
+  expect(
+    await page
+      .locator('.fd-reserved-corner-indicator')
+      .last()
+      .evaluate((el) => el.style.gridColumn),
+  ).not.toBe(portraitSpan);
+});
+
+test('portrait Yoke keeps the grid unmounted behind its rotate prompt', async ({ page }) => {
+  await isolateShell(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/index.html');
+  await expect.poll(() => page.evaluate(() => Boolean(window.flightDeck?.activeProfile))).toBe(true);
+  await page.evaluate(() => window.flightDeck.switchPage('page_yoke'));
+  await expect(page.locator('.fd-rotate-prompt')).toBeVisible();
+  await expect(page.locator('#content-area .fd-page-grid')).toHaveCount(0);
+  await expect(page.locator('#content-area > .fd-corner-overlay')).toHaveCount(1);
 });

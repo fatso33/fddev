@@ -25,6 +25,7 @@ import { RotatePrompt } from './ui/RotatePrompt.js';
 import { Profile } from './models/Profile.js';
 import { Page } from './models/Page.js';
 import { NavigationManager } from './services/NavigationManager.js';
+import { handleOrientationChange, refreshGridGeometry, renderActivePage } from './services/PageRenderer.js';
 import {
   getCornerWidgetLayouts as calculateCornerWidgetLayouts,
   getReservedCornerEntries as calculateReservedCornerEntries,
@@ -142,75 +143,11 @@ export class FlightDeckApp {
   }
 
   handleOrientationChange(newOrientation, isResize = false) {
-    const currentWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
-    const currentHeight = typeof window !== 'undefined' ? window.innerHeight : 768;
-    const newDeviceTier = LayoutEngine.getDeviceTier(currentWidth, currentHeight);
-    const orientationActuallyChanged = newOrientation !== this.currentOrientation;
-    const tierActuallyChanged = newDeviceTier !== this.currentDeviceTier;
-
-    this.currentOrientation = newOrientation;
-    if (this.editToolbar) {
-      this.editToolbar.setOrientation(newOrientation);
-    }
-
-    if (this.activePageId === 'page_settings') {
-      return;
-    }
-
-    // The watcher's own >5px threshold (see LayoutEngine.initOrientationWatcher)
-    // fires this for ANY resize, not just a real portrait<->landscape flip --
-    // including the on-screen keyboard opening/closing and the Fullscreen API's
-    // status-bar hide/show transition, both of which change window.innerHeight
-    // well past that threshold. renderActivePage() destroys and rebuilds every
-    // widget instance from scratch, which (a) yanks focus off whatever's
-    // focused -- e.g. dismissing the keyboard the instant it opens, since the
-    // <input> it was anchored to gets torn down and recreated -- and (b) can
-    // fire twice in quick succession across a resize's debounced re-check
-    // (line ~140 in LayoutEngine), painting the grid at two different
-    // transient sizes and producing a visible flash/jump. Neither the
-    // orientation nor the device tier actually changed here, so nothing about
-    // WHICH widgets/grid-spec apply is different -- only the pixel geometry
-    // is. Refresh that in place instead of tearing anything down.
-    if (!orientationActuallyChanged && !tierActuallyChanged) {
-      this.currentDeviceTier = newDeviceTier;
-      this.refreshGridGeometry(newOrientation, newDeviceTier);
-      return;
-    }
-
-    this.renderActivePage();
+    return handleOrientationChange(this, newOrientation, isResize);
   }
 
-  /**
-   * Lightweight counterpart to renderActivePage() for a resize that didn't
-   * actually change orientation or device tier (soft keyboard, fullscreen
-   * transition, browser chrome show/hide, ...). Re-measures column width and
-   * re-applies the resulting grid CSS custom properties to whichever
-   * containers are currently mounted, then asks every already-mounted widget
-   * instance to re-read them via its own applyLayoutStyles() -- same method
-   * BaseWidget already exposes for in-place layout updates (see
-   * updateLayout()) -- without destroying or recreating a single instance,
-   * so focus/keyboard state and any in-progress edit survive untouched.
-   */
   refreshGridGeometry(orientation, deviceTier) {
-    if (this.cornerOverlayEl) {
-      const page = this.activePageId === 'page_settings' ? null : this.activeProfile.getPage(this.activePageId);
-      const gridSpecForCorners = { ...((page && page.getGrid(orientation, deviceTier)) || LayoutEngine.getGridSpec(orientation, deviceTier)) };
-      const liveCornerColWidth = this.layoutEngine.measureColumnWidth(this.cornerOverlayEl, gridSpecForCorners);
-      if (liveCornerColWidth) gridSpecForCorners.rowHeight = liveCornerColWidth;
-      this.layoutEngine.applyGridToContainer(this.cornerOverlayEl, gridSpecForCorners);
-      this.cornerWidgetInstances.forEach((w) => w.applyLayoutStyles());
-    }
-
-    if (this.gridContainer) {
-      const page = this.activePageId === 'page_settings' ? null : this.activeProfile.getPage(this.activePageId);
-      if (page) {
-        const gridSpec = { ...(page.getGrid(orientation, deviceTier) || LayoutEngine.getGridSpec(orientation, deviceTier)) };
-        const liveColWidth = this.layoutEngine.measureColumnWidth(this.gridContainer, gridSpec);
-        if (liveColWidth) gridSpec.rowHeight = liveColWidth;
-        this.layoutEngine.applyGridToContainer(this.gridContainer, gridSpec);
-        this.activeWidgetInstances.forEach((w) => w.applyLayoutStyles());
-      }
-    }
+    return refreshGridGeometry(this, orientation, deviceTier);
   }
 
   initHeaderControls() {
@@ -586,159 +523,10 @@ export class FlightDeckApp {
   }
 
   renderActivePage() {
-    const currentWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
-    const currentHeight = typeof window !== 'undefined' ? window.innerHeight : 768;
-    const orientation = this.layoutEngine.getOrientation(currentWidth, currentHeight);
-    this.currentOrientation = orientation;
-    const deviceTier = LayoutEngine.getDeviceTier(currentWidth, currentHeight);
-    this.currentDeviceTier = deviceTier;
-    if (typeof document !== 'undefined' && document.body) {
-      document.body.dataset.deviceTier = deviceTier;
-    }
-
-    // Clean up active + corner widget instances
-    this.activeWidgetInstances.forEach((w) => w.destroy());
-    this.activeWidgetInstances = [];
-    teardownCornerOverlay(this);
-
-    // Clean up settings view if previously mounted
-    if (this.settingsView) {
-      this.settingsView.destroy();
-    }
-
-    this.contentArea.innerHTML = '';
-
-    // Corner overlay (menu toggle + App Profile badge) -- built as the
-    // first child of #content-area on EVERY branch below (Settings,
-    // no-page, rotate-prompt, normal), since these two widgets must always
-    // be visible and are never stored per-page/profile data (they're
-    // destroyed above and rebuilt fresh every render -- cheap, since they
-    // carry no bindings/state). Uses the current page's own gridSpec when
-    // one resolves (so column math matches the real grid exactly, even if a
-    // page ever declares a custom grid), falling back to the tier default
-    // for 'page_settings' (no real Page entry) or an as-yet-unresolved page.
-    let page = this.activePageId === 'page_settings' ? null : this.activeProfile.getPage(this.activePageId);
-    const gridSpecForCorners = (page && page.getGrid(orientation, deviceTier)) || LayoutEngine.getGridSpec(orientation, deviceTier);
-    this.mountCornerWidgets(orientation, deviceTier, gridSpecForCorners);
-
-    // If active page is Settings, render the static non-editable Settings View
-    if (this.activePageId === 'page_settings') {
-      if (this.isEditMode) {
-        this.isEditMode = false;
-      }
-      this.editToolbar.hide();
-      this.rotatePrompt.hide();
-      this.virtualYoke.stop();
-      this.settingsView.mount(this.contentArea);
-      return;
-    }
-
-    // Get current page (falls back to the profile's first page if the
-    // stored activePageId no longer resolves to anything)
-    if (!page) {
-      page = this.activeProfile.pages[0];
-      if (page) this.activePageId = page.id;
-    }
-
-    if (!page) {
-      this.rotatePrompt.hide();
-      this.virtualYoke.stop();
-      this.gridContainer = document.createElement('div');
-      this.gridContainer.className = 'fd-page-grid';
-      this.gridContainer.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: var(--text-dim); padding: 40px 0;">No avionics widgets on this page.</div>`;
-      this.contentArea.appendChild(this.gridContainer);
-      return;
-    }
-
-    // Orientation-lock enforcement (currently only page_yoke declares
-    // orientationLock: 'landscape'). screen.orientation.lock() is
-    // best-effort — it silently no-ops on iOS Safari and outside standalone
-    // display mode — so the rotate-prompt overlay below is the real
-    // cross-browser gate: while blocked, the widget grid is never built and
-    // the Virtual Yoke engine stays stopped.
-    const needsLandscape = page.orientationLock === 'landscape';
-    if (needsLandscape) {
-      this.tryLockOrientation('landscape');
-    } else {
-      this.tryUnlockOrientation();
-    }
-
-    if (needsLandscape && orientation !== 'landscape') {
-      this.editToolbar.hide();
-      this.rotatePrompt.show();
-      this.virtualYoke.stop();
-      return;
-    }
-    this.rotatePrompt.hide();
-
-    // Create Grid Container for standard widget pages
-    this.gridContainer = document.createElement('div');
-    this.gridContainer.className = `fd-page-grid ${this.isEditMode ? 'edit-mode-active' : ''}`;
-    this.contentArea.appendChild(this.gridContainer);
-
-    const gridSpec = { ...(page.getGrid(orientation, deviceTier) || LayoutEngine.getGridSpec(orientation, deviceTier)) };
-    // Square cells: derive row height from the actually-rendered column
-    // width instead of trusting the tier's static default (or a stale
-    // rowHeight baked into an old saved page's grid spec). Measured against
-    // gridContainer since it's already attached to #content-area above.
-    const liveColWidth = this.layoutEngine.measureColumnWidth(this.gridContainer, gridSpec);
-    if (liveColWidth) gridSpec.rowHeight = liveColWidth;
-    this.layoutEngine.applyGridToContainer(this.gridContainer, gridSpec);
-
-    // Get widgets for the active tier + orientation. Each (tier,
-    // orientation) combination is authored independently -- shipped pages
-    // and future custom pages are hand-tailored per combination, so an
-    // empty combination is rendered as an empty page rather than
-    // auto-mirrored from elsewhere. Use the explicit "Mirror Layout"
-    // toolbar action to copy a layout across as a one-time starting point.
-    const widgets = page.getWidgets(orientation, deviceTier);
-
-    // Normalize (not auto-compact) so old col/row-vs-x/y-only saved data
-    // still resolves correctly, without pulling widgets up over a gap the
-    // user deliberately left. Use the edit toolbar's explicit "Compact"
-    // action to actually close gaps.
-    const compacted = this.layoutEngine.normalizeLayout(widgets || []);
-
-    // Saved layouts from before the corner-widget feature existed may have
-    // real widgets sitting in row 1-2 cells the menu/App Profile corners now
-    // occupy -- push anything overlapping a reserved cell out of the way on
-    // every render (see resolveListWithReservedCorners()). Only written back
-    // into the live in-memory Profile here, same as normalizeLayout() above
-    // -- it isn't durably persisted to storage unless the user enters edit
-    // mode and Saves.
-    const reservedForReflow = this.getReservedCornerEntries(orientation, deviceTier, gridSpec);
-    const finalWidgets = this.resolveListWithReservedCorners(compacted, reservedForReflow);
-    page.setWidgets(orientation, deviceTier, finalWidgets);
-
-    // Instantiate and mount all widgets
-    finalWidgets.forEach((wConfig) => {
-      const widgetInstance = WidgetRegistry.createWidget(wConfig, this.eventBus);
-      if (!widgetInstance) return;
-      widgetInstance.mount(this.gridContainer);
-      widgetInstance.setEditMode(this.isEditMode);
-      this.attachDragHandlers(widgetInstance);
-      this.activeWidgetInstances.push(widgetInstance);
+    return renderActivePage(this, {
+      teardown: teardownCornerOverlay,
+      mount: (orientation, deviceTier, gridSpec) => this.mountCornerWidgets(orientation, deviceTier, gridSpec),
     });
-
-    // If edit toolbar is active, keep it visible (unless the user manually
-    // hid it via the menu corner widget's pencil toggle -- see
-    // toggleEditToolbarVisibility()) and update orientation badge
-    if (this.isEditMode) {
-      this.editToolbar.setOrientation(orientation);
-      if (this.editToolbarVisible) {
-        this.editToolbar.show();
-      } else {
-        this.editToolbar.hide();
-      }
-    } else {
-      this.editToolbar.hide();
-    }
-
-    if (this.activePageId === 'page_yoke') {
-      this.virtualYoke.start();
-    } else {
-      this.virtualYoke.stop();
-    }
   }
 
   /**
