@@ -32,6 +32,11 @@ import {
   resolveDropPlacement as calculateDropPlacement,
   resolveListWithReservedCorners as calculateListWithReservedCorners,
 } from './services/CornerLayout.js';
+import {
+  teardown as teardownCornerOverlay,
+  mountCornerWidgets as mountCornerOverlay,
+  wireCornerInteractions as wireCornerOverlayInteractions,
+} from './services/CornerOverlayManager.js';
 
 export class FlightDeckApp {
   constructor() {
@@ -613,11 +618,7 @@ export class FlightDeckApp {
     // Clean up active + corner widget instances
     this.activeWidgetInstances.forEach((w) => w.destroy());
     this.activeWidgetInstances = [];
-    this.cornerWidgetInstances.forEach((w) => w.destroy());
-    this.cornerWidgetInstances = [];
-    this.menuToggleWidget = null;
-    this.appProfileWidget = null;
-    this.cornerOverlayEl = null;
+    teardownCornerOverlay(this);
 
     // Clean up settings view if previously mounted
     if (this.settingsView) {
@@ -855,56 +856,7 @@ export class FlightDeckApp {
    * per renderActivePage() call, on every branch.
    */
   mountCornerWidgets(orientation, deviceTier, gridSpec) {
-    const overlay = document.createElement('div');
-    overlay.className = 'fd-corner-overlay';
-    // Append before measuring/applying: getBoundingClientRect() on a
-    // disconnected element returns a zero-width rect, which would silently
-    // fall back and skip the square-cell derivation below (same class of
-    // mount-order hazard as BaseWidget.applyLayoutStyles()).
-    this.contentArea.appendChild(overlay);
-    const resolvedGridSpec = { ...gridSpec };
-    const liveColWidth = this.layoutEngine.measureColumnWidth(overlay, resolvedGridSpec);
-    if (liveColWidth) resolvedGridSpec.rowHeight = liveColWidth;
-    this.layoutEngine.applyGridToContainer(overlay, resolvedGridSpec);
-    this.cornerOverlayEl = overlay;
-    // Reacts to toggleEditMode() toggling this same class -- set here too
-    // so it starts correct if a page is (re)rendered while already editing.
-    overlay.classList.toggle('edit-mode-active', this.isEditMode);
-
-    const { menu, profile } = this.getCornerWidgetLayouts(orientation, deviceTier, gridSpec);
-
-    // Hatched "reserved" indicators for the two corners' full grid
-    // footprint (including the margin columns not covered by the visible
-    // button/badge, see getCornerWidgetLayouts()) -- invisible outside edit
-    // mode (see .fd-reserved-corner-indicator, grid.css), so a user editing
-    // the page can see that gap isn't actually free space, without cluttering
-    // the normal view. Appended before the widgets mount so they paint
-    // underneath (harmless where the opaque button/badge already covers it).
-    [menu, profile].forEach((entry) => {
-      const indicator = document.createElement('div');
-      indicator.className = 'fd-reserved-corner-indicator';
-      indicator.style.gridColumn = `${entry.layout.col} / span ${entry.layout.w}`;
-      indicator.style.gridRow = `${entry.layout.row} / span ${entry.layout.h}`;
-      overlay.appendChild(indicator);
-    });
-
-    const menuInstance = WidgetRegistry.createWidget(menu, this.eventBus);
-    menuInstance.mount(overlay);
-    // The overlay itself is pointer-events:none (see grid.css) so clicks
-    // pass through to real widgets in the reserved-but-otherwise-empty
-    // middle columns; these two are the exception.
-    menuInstance.element.style.pointerEvents = 'auto';
-    this.cornerWidgetInstances.push(menuInstance);
-    this.menuToggleWidget = menuInstance;
-
-    const profileInstance = WidgetRegistry.createWidget(profile, this.eventBus);
-    profileInstance.mount(overlay);
-    profileInstance.element.style.pointerEvents = 'auto';
-    this.cornerWidgetInstances.push(profileInstance);
-    this.appProfileWidget = profileInstance;
-
-    this.updateMenuButtonStatus();
-    this.wireCornerInteractions();
+    return mountCornerOverlay(this, orientation, deviceTier, gridSpec);
   }
 
   /**
@@ -916,45 +868,7 @@ export class FlightDeckApp {
    * avoid accumulating a new document-level listener on every render.
    */
   wireCornerInteractions() {
-    const badgeEl = this.appProfileWidget?.element;
-    if (badgeEl) {
-      this.attachLongPressOpen(badgeEl, () => {
-        if (this.profileSelector) this.profileSelector.open();
-      });
-    }
-
-    const menuBtn = this.menuToggleWidget?.element;
-    const menuDropdown = document.getElementById('menu-dropdown');
-    if (!menuBtn || !menuDropdown) return;
-
-    menuBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      // While editing, the menu corner widget shows a pencil icon (see
-      // MenuToggleWidget.setAppEditMode()) and toggles the edit toolbar's
-      // visibility instead of opening the nav dropdown -- the toolbar can
-      // otherwise cover the same top rows this widget and the App Profile
-      // badge (and any real widget placed between them) occupy.
-      if (this.isEditMode) {
-        this.toggleEditToolbarVisibility();
-        return;
-      }
-      const editBtn = document.getElementById('menu-edit-mode-btn');
-      if (editBtn) {
-        editBtn.style.display = (this.activePageId === 'page_settings') ? 'none' : 'flex';
-      }
-      // Anchor the dropdown to the menu button's actual position rather
-      // than the CSS fallback -- the button's x-position shifts with
-      // orientation/tier (corner widget footprint scales, see
-      // getCornerWidgetLayouts()), so this has to be computed fresh on
-      // every open rather than fixed in CSS. Only set while opening (not
-      // closing) so nothing shifts position mid-close-animation.
-      const opening = !menuDropdown.classList.contains('open');
-      if (opening) {
-        const btnRect = menuBtn.getBoundingClientRect();
-        menuDropdown.style.left = `${Math.round(btnRect.left)}px`;
-      }
-      menuDropdown.classList.toggle('open');
-    });
+    return wireCornerOverlayInteractions(this);
   }
 
   /**
