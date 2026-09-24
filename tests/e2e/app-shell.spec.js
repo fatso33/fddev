@@ -17,6 +17,22 @@ async function isolateShell(page) {
   });
 }
 
+test('header theme and live menu status work after UI coordination', async ({ page }) => {
+  await isolateShell(page);
+  await page.goto('/index.html');
+  const menu = page.locator('[data-widget-id="__corner_menu__"]');
+  await menu.click();
+  await expect(page.locator('#menu-dropdown')).toHaveClass(/open/);
+  await page.locator('label[aria-label="Toggle Night Mode"]').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  expect(await page.evaluate(() => localStorage.getItem('flightdeck_theme'))).toBe('light');
+  await page.evaluate(() => window.flightDeck.eventBus.publish('SIM_STATUS', { connected: true }));
+  expect(await page.evaluate(() => window.flightDeck.simConnected)).toBe(true);
+  await page.locator('.menu-item-btn[data-page="settings"]').click();
+  await expect(page.locator('#fd-settings-page')).toHaveCount(1);
+  await expect(page.locator('#menu-dropdown')).not.toHaveClass(/open/);
+});
+
 test('the real shell boots and navigates while all bridge traffic is intercepted', async ({
   page,
 }) => {
