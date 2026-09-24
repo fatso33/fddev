@@ -164,3 +164,144 @@ test('portrait Yoke keeps the grid unmounted behind its rotate prompt', async ({
   await expect(page.locator('#content-area .fd-page-grid')).toHaveCount(0);
   await expect(page.locator('#content-area > .fd-corner-overlay')).toHaveCount(1);
 });
+
+async function editAutopilot(page) {
+  await isolateShell(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/index.html');
+  await expect
+    .poll(() => page.evaluate(() => Boolean(window.flightDeck?.activeProfile)))
+    .toBe(true);
+  await page.evaluate(() => window.flightDeck.switchPage('page_autopilot'));
+  await expect
+    .poll(() => page.evaluate(() => window.flightDeck?.activeWidgetInstances?.length ?? 0))
+    .toBeGreaterThan(1);
+  await page.evaluate(() => window.flightDeck.toggleEditMode(true));
+  // The edit toolbar shifts the grid while it animates in; measure after it settles.
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.getAnimations().some((a) => a instanceof CSSTransition)),
+    )
+    .toBe(false);
+}
+
+function currentLayouts(page) {
+  return page.evaluate(() => {
+    const app = window.flightDeck;
+    return app.activeProfile
+      .getPage(app.activePageId)
+      .getWidgets(app.currentOrientation, app.currentDeviceTier)
+      .map((w) => ({
+        id: w.id,
+        col: w.layout.col,
+        row: w.layout.row,
+        w: w.layout.w,
+        h: w.layout.h,
+      }));
+  });
+}
+
+// Probes the rendered grid track for a cell, so the pointer lands where the
+// real LayoutEngine.pixelToGridCell() resolves that column and row.
+function cellCenter(page, col, row) {
+  return page.evaluate(
+    ([c, r]) => {
+      const probe = document.createElement('div');
+      probe.style.gridColumn = `${c} / span 1`;
+      probe.style.gridRow = `${r} / span 1`;
+      window.flightDeck.gridContainer.appendChild(probe);
+      const rect = probe.getBoundingClientRect();
+      probe.remove();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    },
+    [col, row],
+  );
+}
+
+async function widgetCenter(page, id) {
+  const box = await page.locator(`.fd-page-grid [data-widget-id="${id}"]`).first().boundingBox();
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+async function dragTo(page, from, to) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 6 });
+  await page.mouse.up();
+}
+
+test('dragging a widget to a free cell commits the moved layout', async ({ page }) => {
+  await editAutopilot(page);
+  const target = await page.evaluate(() => {
+    const app = window.flightDeck;
+    const page = app.activeProfile.getPage(app.activePageId);
+    const spec = page.getGrid(app.currentOrientation, app.currentDeviceTier);
+    const widgets = page.getWidgets(app.currentOrientation, app.currentDeviceTier);
+    const reserved = app.getReservedCornerEntries(
+      app.currentOrientation,
+      app.currentDeviceTier,
+      spec,
+    );
+    const intersects = app.layoutEngine.constructor.boxesIntersect;
+    // Rows past the rendered tracks are estimated, so the target stays inside them.
+    const renderedRows = getComputedStyle(app.gridContainer).gridTemplateRows.split(' ').length;
+    for (const moving of widgets) {
+      const { w, h } = moving.layout;
+      for (let row = 1; row <= renderedRows && row + h - 1 <= spec.rows; row++) {
+        for (let col = 1; col + w - 1 <= spec.columns; col++) {
+          if (col === moving.layout.col && row === moving.layout.row) continue;
+          const candidate = { col, row, w, h };
+          const blocked = [...widgets.filter((o) => o.id !== moving.id), ...reserved].some((o) =>
+            intersects(candidate, o.layout),
+          );
+          if (!blocked) return { id: moving.id, col, row };
+        }
+      }
+    }
+    return null;
+  });
+  expect(target).not.toBeNull();
+  await dragTo(
+    page,
+    await widgetCenter(page, target.id),
+    await cellCenter(page, target.col, target.row),
+  );
+  await expect
+    .poll(async () => (await currentLayouts(page)).find((w) => w.id === target.id))
+    .toMatchObject({ col: target.col, row: target.row });
+  expect(
+    await page.evaluate(
+      (id) => window.flightDeck.activeWidgetInstances.find((w) => w.id === id).layout.col,
+      target.id,
+    ),
+  ).toBe(target.col);
+});
+
+test('a refused drop with auto-reposition off toasts and keeps the layout', async ({ page }) => {
+  await editAutopilot(page);
+  const before = await currentLayouts(page);
+  const [moving, occupied] = before;
+  await dragTo(
+    page,
+    await widgetCenter(page, moving.id),
+    await cellCenter(page, occupied.col, occupied.row),
+  );
+  await expect(page.locator('#fd-global-toast')).toHaveText(
+    'Auto-Reposition is off -- that spot is occupied.',
+  );
+  expect(await currentLayouts(page)).toEqual(before);
+});
+
+test('a steady long press on a widget opens the property inspector', async ({ page }) => {
+  await editAutopilot(page);
+  const [first] = await currentLayouts(page);
+  const inspector = page.locator('.fd-inspector-overlay:has(#fd-insp-title)');
+  await expect(inspector).toHaveClass(/hidden/);
+  const center = await widgetCenter(page, first.id);
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.waitForTimeout(600);
+  await expect(inspector).not.toHaveClass(/hidden/);
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.flightDeck.draggedWidget)).toBeNull();
+});
