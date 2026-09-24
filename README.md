@@ -2,6 +2,8 @@
 
 The tablet/mobile avionics touchscreen companion app for MSFS 2024. Plain static HTML/CSS/JS — no build step.
 
+`js/app.js` owns startup, the live app state and the public `FlightDeckApp` facade. `js/services/` owns page navigation and rendering, reserved-corner layout and overlays, drag gestures, layout editing, App Profile coordination and UI/event wiring. These services use the same app context; `SimBridge` remains the connection owner and `StorageManager` remains the persistent store.
+
 - **Radio Stack**: Active/Standby tuning for COM1, COM2, NAV1, NAV2 with presets.
 - **Autopilot Matrix**: AP Master, Auto-Throttle, Flight Director, Heading Bug, Altitude, VS wheel, NAV/APR/BC holds, Flaps/Spoilers.
 - **Lighting Systems**: External and internal lighting controls.

@@ -1,8 +1,9 @@
 /**
- * app.js
- * Flight Deck v2.4 Bootstrap & Lifecycle Coordinator
- * Integrates Declarative Dual-Orientation Grid Engine, Hardware Orientation Watcher,
- * Reactive SimData Pipeline & Dynamic PC Bridge Protocol
+ * @module app
+ * Owns the single PWA app context, ordered initialization, service-worker
+ * registration and DOM-ready bootstrap. Services share this live context;
+ * SimBridge owns its connection, while the app retains widget, edit, profile,
+ * UI and orientation state exposed through the original facade methods.
  */
 
 import { EventBus } from './core/EventBus.js';
@@ -35,6 +36,7 @@ import {
   wireCornerInteractions as wireCornerOverlayInteractions,
 } from './services/CornerOverlayManager.js';
 
+/** Composes the PWA services around one mutable app state and public facade. */
 export class FlightDeckApp {
   constructor() {
     this.eventBus = new EventBus();
@@ -64,22 +66,18 @@ export class FlightDeckApp {
     // FullscreenManager/WakeLockManager's own toggles.
     this.autoRepositionEnabled = localStorage.getItem('flightdeck_auto_reposition') === 'true';
 
-    // Undo/Redo history stack for edit mode
+    // Edit history is held on the app so controller callbacks share one stack.
     this.historyStack = [];
 
-    // UI Modules
+    // UI instances are mounted during initUIComponents().
     this.editToolbar = null;
     this.widgetDrawer = null;
     this.propertyInspector = null;
     this.profileSelector = null;
     this.rotatePrompt = null;
 
-    // Corner widgets (menu toggle + App Profile badge) -- fixed,
-    // non-draggable, non-removable fixtures floated over the real page
-    // grid's top-left/top-right cells (see .fd-corner-overlay,
-    // mountCornerWidgets()). Destroyed and recreated on every
-    // renderActivePage() call, all branches -- see that method -- so these
-    // fields are reassigned every render, not set once at startup.
+    // Corner controls are rebuilt on every page-render branch; these fields
+    // keep the current overlay and widget instances, including their teardown.
     this.cornerWidgetInstances = [];
     this.menuToggleWidget = null;
     this.appProfileWidget = null;
@@ -114,16 +112,16 @@ export class FlightDeckApp {
     // 2. Initialize SimBridge connection
     this.simBridge.connect();
 
-    // 3. Initialize Top Global Controls & Theme
+    // 3. Initialize global controls and theme.
     this.initHeaderControls();
 
-    // 4. Initialize UI Toolbars & Modals
+    // 4. Initialize toolbars and modals.
     this.initUIComponents();
 
-    // 5. Subscribe to EventBus core topics
+    // 5. Subscribe to app EventBus topics.
     this.initEventSubscriptions();
 
-    // 6. Preload and compile shared widget stylesheets into memory for zero-FOUC rendering
+    // 6. Preload shared widget stylesheets before the first render to avoid FOUC.
     await BaseWidget.preloadStyles();
 
     // 7. Mount hardware orientation listener & resize watcher
@@ -131,9 +129,7 @@ export class FlightDeckApp {
       this.handleOrientationChange(newOrientation, isResize);
     });
 
-    // 8. Mount and render current active page -- this also builds the
-    // corner overlay (menu toggle + App Profile badge) on every branch, see
-    // renderActivePage()/mountCornerWidgets().
+    // 8. Build the menu and render the active page with its corner overlay.
     this.renderPageMenu();
     this.renderActivePage();
 
@@ -181,124 +177,46 @@ export class FlightDeckApp {
     });
   }
 
-  /**
-   * Computes the fixed corner layouts for the menu toggle (top-left, 3x2)
-   * and App Profile badge (top-right, 5x2), scaled proportionally from the
-   * same 20-col-portrait/44-col-landscape mobile reference every other
-   * widget's defaultLayout is authored against -- same declaredForCols
-   * scaling addNewWidgetToPage() already uses for ordinary widgets.
-   * @param {'portrait'|'landscape'} orientation
-   * @param {'mobile'|'tablet'} deviceTier
-   * @param {{columns:number}} gridSpec
-   */
+  /** Returns the scaled menu and badge layouts with their reserved edge margins. */
   getCornerWidgetLayouts(orientation, deviceTier, gridSpec) {
     return calculateCornerWidgetLayouts(orientation, deviceTier, gridSpec, this.isEditMode, this.activeProfile);
   }
 
-  /**
-   * The same two corner positions as getCornerWidgetLayouts(), reduced to
-   * the {id, layout} shape LayoutEngine's collision functions already
-   * expect -- spliced into a widgetList at every collision-aware call site
-   * (addNewWidgetToPage, attachDragHandlers's endDrag,
-   * handleUpdateWidgetConfig, handleCompactLayout, handleMirrorLayout) so
-   * real widgets are never auto-placed or dragged into a corner cell, then
-   * filtered back out before the result is written via page.setWidgets() --
-   * this reservation is virtual/computed, never persisted (the corner
-   * widgets are app-global, not page content).
-   */
+  /** Returns virtual corner obstacles; page data never stores them. */
   getReservedCornerEntries(orientation, deviceTier, gridSpec) {
     return calculateReservedCornerEntries(this.getCornerWidgetLayouts(orientation, deviceTier, gridSpec));
   }
 
   /**
-   * Resolves a widgetList's layout via LayoutEngine.resolveLayoutWithPushDown()
-   * as normal (movingId authoritative at targetLayout, colliding real
-   * widgets pushed down) and THEN makes one additional pass per reserved
-   * corner entry, each time treating that corner as the "moving" widget at
-   * its own fixed position -- so real widgets get pushed away from a
-   * reserved cell, never the other way around. Calling
-   * resolveLayoutWithPushDown() directly with reserved corners simply
-   * mixed into the list would do the opposite: since the function always
-   * keeps whichever id is passed as movingId exactly at its target and
-   * pushes everything else, a real widget passed as movingId would shove
-   * the "reserved" corner entries out of the way instead, since they're
-   * just ordinary list entries to that function otherwise. Reserved entries
-   * are always stripped from the returned list before it's used.
-   * @param {string} movingId
-   * @param {object} targetLayout
-   * @param {Array<object>} widgetList - real widgets only, no reserved entries
-   * @param {Array<object>} reserved - from getReservedCornerEntries()
-   * @returns {Array<object>} real widgets only, reserved-corner-safe
+   * Resolves a real widget with fixed corners authoritative. LayoutEngine
+   * protects its moving ID, so each corner must take that role in a postpass;
+   * placing corner entries in the first widget list would let them be pushed.
    */
   resolveWithReservedCorners(movingId, targetLayout, widgetList, reserved) {
     return calculateWithReservedCorners(this.layoutEngine, movingId, targetLayout, widgetList, reserved);
   }
 
-  /**
-   * Resolves where `candidate` should land for `movingWidgetId` during a
-   * drag-and-drop move, respecting the Auto-Reposition toggle
-   * (this.autoRepositionEnabled, see toggleAutoReposition()): if it
-   * collides with anything and Auto-Reposition is off, the placement is
-   * rejected outright rather than nudged; otherwise
-   * LayoutEngine.resolveSmartNudge() runs (a plain no-op placement when
-   * there was nothing to nudge in the first place, i.e. no collision).
-   * Shared by attachDragHandlers()'s live 1-second hold preview and its
-   * actual drop commit, so both always agree on the outcome.
-   * @param {string} movingWidgetId
-   * @param {{col:number,row:number,w:number,h:number}} candidate
-   * @param {Array<object>} widgetList - real widgets only
-   * @param {object} gridSpec
-   * @param {Array<{id:string,layout:object}>} reserved
-   * @returns {{ok:true, widgets:Array<object>}|{ok:false}}
-   */
+  /** Uses the live nudge preference for both drag preview and drop. */
   resolveDropPlacement(movingWidgetId, candidate, widgetList, gridSpec, reserved) {
     return calculateDropPlacement(this.layoutEngine, this.autoRepositionEnabled, movingWidgetId, candidate, widgetList, gridSpec, reserved);
   }
 
-  /**
-   * Same idea as resolveWithReservedCorners() but for building a whole
-   * layout from scratch rather than moving one widget: inserts each item in
-   * `items` one at a time via resolveLayoutWithPushDown() (so later
-   * insertions cascade-push earlier real ones, same insert-one-at-a-time
-   * pattern LayoutEngine.mirrorLayout() already uses internally), then runs
-   * the same reserved-corner-eviction pass. Used by handleMirrorLayout()'s
-   * post-pass and renderActivePage()'s pre-existing-data reflow.
-   * @param {Array<object>} items
-   * @param {Array<object>} reserved - from getReservedCornerEntries()
-   * @returns {Array<object>}
-   */
+  /** Builds a full layout in insertion order, then evicts corner overlaps. */
   resolveListWithReservedCorners(items, reserved) {
     return calculateListWithReservedCorners(this.layoutEngine, items, reserved);
   }
 
-  /**
-   * Builds the .fd-corner-overlay (see grid.css) as the first child of
-   * #content-area and mounts the two corner widgets into it. Called once
-   * per renderActivePage() call, on every branch.
-   */
+  /** Mounts the corner overlay for the current page-render branch. */
   mountCornerWidgets(orientation, deviceTier, gridSpec) {
     return mountCornerOverlay(this, orientation, deviceTier, gridSpec);
   }
 
-  /**
-   * (Re)wires the menu button's click handler and the App Profile badge's
-   * long-press handler. Called once per renderActivePage() (from
-   * mountCornerWidgets()), since both corner widgets are destroyed and
-   * recreated every render. The dropdown's own outside-click-to-close
-   * listener is NOT here -- see initHeaderControls()'s one-time setup, to
-   * avoid accumulating a new document-level listener on every render.
-   */
+  /** Wires the current corner widgets; the outside-click listener is one-time. */
   wireCornerInteractions() {
     return wireCornerOverlayInteractions(this);
   }
 
-  /**
-   * Best-effort Screen Orientation API lock. No-ops (silently) on iOS
-   * Safari and in several other browser contexts — the RotatePrompt
-   * overlay in renderActivePage() is the actual enforcement mechanism,
-   * this is just a nicety where the platform supports it.
-   * @param {'landscape'|'portrait'} orientation
-   */
+  /** Requests a best-effort platform lock; RotatePrompt enforces the page UI. */
   tryLockOrientation(orientation) {
     return this.appUi.tryLockOrientation(orientation);
   }
@@ -311,35 +229,17 @@ export class FlightDeckApp {
     return this.layoutEdit.toggleEditMode(active);
   }
 
-  /**
-   * Toggles the edit-mode toolbar's visibility without leaving edit mode --
-   * triggered by tapping the menu corner widget's pencil icon while editing
-   * (see MenuToggleWidget.setAppEditMode()/wireCornerInteractions()). Needed
-   * because the toolbar's own row can otherwise cover the same top rows the
-   * corner widgets (and any real widget placed between them) occupy.
-   */
+  /** Toggles the toolbar without leaving edit mode or changing page layout. */
   toggleEditToolbarVisibility() {
     return this.layoutEdit.toggleEditToolbarVisibility();
   }
 
-  /**
-   * Flips whether dropping a widget onto another nudges the existing widget
-   * out of the way (LayoutEngine.resolveSmartNudge(), see attachDragHandlers)
-   * or refuses the drop outright. Persisted so the preference survives a
-   * reload, same pattern as FullscreenManager/WakeLockManager.
-   * @param {boolean} enabled
-   */
+  /** Persists whether occupied drops nudge another widget or are refused. */
   toggleAutoReposition(enabled) {
     return this.layoutEdit.toggleAutoReposition(enabled);
   }
 
-  /**
-   * Generic long-press (500ms, cancels if the pointer moves more than 8px
-   * or is released early) gesture binder. Used for the App Profile badge so
-   * a stray tap doesn't pop open the App Profiles popover.
-   * @param {HTMLElement} el
-   * @param {Function} onLongPress
-   */
+  /** Binds the badge's 500 ms long press with its 8 px movement tolerance. */
   attachLongPressOpen(el, onLongPress) {
     return bindLongPressOpen(el, onLongPress);
   }
@@ -381,12 +281,7 @@ export class FlightDeckApp {
     return this.layoutEdit.handleUndo();
   }
 
-  /**
-   * "Compact" edit-toolbar action — the only path that still pulls widgets
-   * up to close gaps (see LayoutEngine.compactLayout()'s doc comment).
-   * Everywhere else (render/add/remove/move) leaves a deliberately-left gap
-   * alone; this is the explicit, user-requested way to actually close them.
-   */
+  /** Closes intentional layout gaps only on the explicit Compact action. */
   handleCompactLayout() {
     return this.layoutEdit.handleCompactLayout();
   }
@@ -399,104 +294,42 @@ export class FlightDeckApp {
     return this.layoutEdit.handleCancelEdit();
   }
 
-  /**
-   * Constructs a Profile from raw storage data and, if it's a fork
-   * (parentProfileId set), hydrates in any pages it doesn't override yet
-   * from its parent -- see Profile.hydrateInheritedPages(). Every place
-   * that activates a profile for viewing/editing should go through this
-   * instead of `new Profile(raw)` directly, or pages the fork hasn't
-   * touched won't resolve.
-   * @param {object} raw
-   * @returns {Promise<import('./models/Profile.js').Profile>}
-   */
+  /** Activates stored data with inherited pages hydrated from its parent. */
   async activateProfile(raw) {
     return this.profileCoordinator.activateProfile(raw);
   }
 
-  /**
-   * Ensures the currently-edited page can actually be persisted:
-   * - If the active profile is a shipped default (e.g. 'default_ga'), the
-   *   very first edit auto-forks a "Custom" App Profile (or reuses an
-   *   existing fork of this same default) and moves the edited page into it
-   *   as a real override -- shipped defaults are never written to directly,
-   *   both because StorageManager.saveProfile() would silently skip pushing
-   *   them to PC Bridge, and because editing them in place would remove the
-   *   "revert this one page" option entirely.
-   * - If the active profile is already a fork and the edited page is still
-   *   only inherited (not yet its own override), promotes it in place.
-   * Called once, right before persisting, from handleSaveLayout().
-   */
+  /** Makes the edited page an own override, forking shipped defaults first. */
   async ensureEditableProfile() {
     return this.profileCoordinator.ensureEditableProfile();
   }
 
-  /**
-   * Forks the active (shipped default) profile into a "Custom" App Profile,
-   * reusing an existing fork of this same default if one is already active,
-   * and switches to it. If `pageToMove` is given, it's moved into the fork
-   * as a real override (used when an edited page needs to land somewhere
-   * persistable); omit it when forking just to make room for a brand-new
-   * custom page (see handleAddCustomPage()).
-   * @param {import('./models/Page.js').Page|null} pageToMove
-   */
+  /** Reuses or creates a default fork, optionally copying an edited page. */
   async forkFromDefault(pageToMove = null) {
     return this.profileCoordinator.forkFromDefault(pageToMove);
   }
 
-  /**
-   * Prompts for a name and adds a brand-new custom page to the active
-   * profile (forking off the shipped default first if needed, same rule as
-   * any other edit), then adds it to the nav menu and switches to it.
-   */
+  /** Prompts for and persists a custom page, then navigates to it. */
   async handleAddCustomPage() {
     return this.profileCoordinator.handleAddCustomPage();
   }
 
-  /**
-   * Permanently deletes a custom (non-shipped) page from the active
-   * profile, called from the Settings page's Manage Pages card. Unlike
-   * handleRevertPageToDefault() there is no fallback to hydrate in -- a
-   * custom page has no shipped-default counterpart -- so this is a real,
-   * unrecoverable delete via Profile.removePage(). If the deleted page was
-   * currently active, falls back to the first remaining page.
-   * @param {string} pageId
-   */
+  /** Removes a custom page and selects a fallback ID when it was active. */
   async handleDeleteCustomPage(pageId) {
     return this.profileCoordinator.handleDeleteCustomPage(pageId);
   }
 
-  /**
-   * Read-only snapshot of the active profile's custom (non-shipped) pages,
-   * for the Settings page's Manage Pages card.
-   * @returns {Array<{id: string, name: string}>}
-   */
+  /** Returns the active profile's custom page IDs and names. */
   getCustomPages() {
     return this.profileCoordinator.getCustomPages();
   }
 
-  /**
-   * Rebuilds the nav menu dropdown's custom-page entries from the active
-   * profile's page list. The shipped default pages (Radios/Autopilot/
-   * Lights/Virtual Yoke/Settings) stay as static markup in index.html --
-   * only pages NOT part of the shipped default set are injected here, since
-   * those are the only ones that can vary between profiles/forks. Adding
-   * and deleting custom pages themselves is done from the Settings page
-   * (see SettingsView's Manage Pages card) rather than from this dropdown,
-   * so a user scrolling the menu can't accidentally trigger either action.
-   */
+  /** Rebuilds custom menu entries; shipped page entries remain static markup. */
   renderPageMenu() {
     return this.navigation.renderPageMenu();
   }
 
-  /**
-   * Reverts one page in the active fork back to its shipped-default state
-   * by removing the fork's own override, then re-hydrating the inherited
-   * fallback so rendering keeps working. Leaves every other overridden page
-   * in the fork untouched -- that per-page independence is the whole point
-   * of the overlay model (see Profile.js). No-op (besides the toast) if the
-   * page isn't actually an override here.
-   * @param {string} pageId
-   */
+  /** Reverts one own page and hydrates its inherited fallback. */
   async handleRevertPageToDefault(pageId) {
     return this.profileCoordinator.handleRevertPageToDefault(pageId);
   }
