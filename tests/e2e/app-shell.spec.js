@@ -338,3 +338,73 @@ test('editing a shipped page forks Custom, survives reload and reverts that page
   await expect(page.locator(`.fd-page-grid [data-widget-id="${firstId}"]`)).toHaveCount(1);
   expect(await page.evaluate(() => window.flightDeck.activeProfile.hasOwnPage('page_autopilot'))).toBe(false);
 });
+
+test('drawer add and toolbar Undo restore the prior layout', async ({ page }) => {
+  await editAutopilot(page);
+  const before = await currentLayouts(page);
+  await page.locator('#tb-add-widget-btn').click();
+  await expect(page.locator('.fd-drawer-overlay')).not.toHaveClass(/hidden/);
+  await page.locator('.fd-drawer-item-card:has-text("Annunciator Indicator") .fd-drawer-item-add-btn').click();
+  await expect.poll(async () => (await currentLayouts(page)).length).toBe(before.length + 1);
+  await page.locator('#tb-undo-btn').click();
+  await expect.poll(() => currentLayouts(page)).toEqual(before);
+});
+
+test('Compact closes an intentional gap while keeping corner cells reserved', async ({ page }) => {
+  await editAutopilot(page);
+  await page.evaluate(() => {
+    const app = window.flightDeck;
+    const active = app.activeProfile.getPage(app.activePageId);
+    active.setWidgets(app.currentOrientation, app.currentDeviceTier, [{
+      id: 'gap-widget', type: 'DisplayWidget', layout: { col: 5, row: 20, w: 3, h: 2 }, config: {},
+    }]);
+    app.renderActivePage();
+  });
+  await page.locator('#tb-compact-btn').click();
+  const state = await page.evaluate(() => {
+    const app = window.flightDeck;
+    const active = app.activeProfile.getPage(app.activePageId);
+    const grid = active.getGrid(app.currentOrientation, app.currentDeviceTier);
+    return {
+      widgets: active.getWidgets(app.currentOrientation, app.currentDeviceTier),
+      reserved: app.getReservedCornerEntries(app.currentOrientation, app.currentDeviceTier, grid),
+    };
+  });
+  expect(state.widgets).toHaveLength(1);
+  expect(state.widgets[0].layout.row).toBeLessThan(20);
+  expect(state.widgets.every((widget) => state.reserved.every((entry) =>
+    !((widget.layout.col < entry.layout.col + entry.layout.w) &&
+      (widget.layout.col + widget.layout.w > entry.layout.col) &&
+      (widget.layout.row < entry.layout.row + entry.layout.h) &&
+      (widget.layout.row + widget.layout.h > entry.layout.row))
+  ))).toBe(true);
+});
+
+test('Discard cancels an unsaved widget move', async ({ page }) => {
+  await editAutopilot(page);
+  const before = await currentLayouts(page);
+  const target = await page.evaluate(() => {
+    const app = window.flightDeck;
+    const active = app.activeProfile.getPage(app.activePageId);
+    const spec = active.getGrid(app.currentOrientation, app.currentDeviceTier);
+    const placed = active.getWidgets(app.currentOrientation, app.currentDeviceTier);
+    const reserved = app.getReservedCornerEntries(app.currentOrientation, app.currentDeviceTier, spec);
+    const intersects = app.layoutEngine.constructor.boxesIntersect;
+    const moving = placed[0];
+    for (let row = 2; row < 20; row++) {
+      for (let col = 1; col + moving.layout.w <= spec.columns; col++) {
+        const candidate = { col, row, w: moving.layout.w, h: moving.layout.h };
+        if (![...placed.slice(1), ...reserved].some((other) => intersects(candidate, other.layout))) {
+          return { id: moving.id, col, row };
+        }
+      }
+    }
+    return null;
+  });
+  expect(target).not.toBeNull();
+  await dragTo(page, await widgetCenter(page, target.id), await cellCenter(page, target.col, target.row));
+  await expect.poll(async () => (await currentLayouts(page)).find((w) => w.id === target.id))
+    .toMatchObject({ col: target.col, row: target.row });
+  await page.locator('#tb-cancel-btn').click();
+  await expect.poll(() => currentLayouts(page)).toEqual(before);
+});

@@ -11,6 +11,7 @@ import { LayoutEngine } from '../js/core/LayoutEngine.js';
 import { VirtualYokeEngine } from '../js/core/VirtualYokeEngine.js';
 import { PwaInstallManager } from '../js/core/PwaInstallManager.js';
 import { NavigationManager } from '../js/services/NavigationManager.js';
+import { LayoutEditController } from '../js/services/LayoutEditController.js';
 
 let harness;
 beforeEach(async () => { harness = await createAppHarness(); });
@@ -44,8 +45,10 @@ describe('FlightDeckApp shell', () => {
       'propertyInspector', 'profileSelector', 'rotatePrompt', 'cornerWidgetInstances',
       'menuToggleWidget', 'appProfileWidget', 'cornerOverlayEl', 'editToolbarVisible',
       'contentArea', 'gridContainer', 'orientationUnsub', 'navigation', 'profileCoordinator',
+      'layoutEdit',
     ]);
     expect(app.navigation).toBeInstanceOf(NavigationManager);
+    expect(app.layoutEdit).toBeInstanceOf(LayoutEditController);
     for (const [field, Class] of [
       ['eventBus', EventBus], ['storage', StorageManager], ['simBridge', SimBridge],
       ['layoutEngine', LayoutEngine], ['virtualYoke', VirtualYokeEngine],

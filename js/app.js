@@ -23,6 +23,7 @@ import { ProfileSelector } from './ui/ProfileSelector.js';
 import { SettingsView } from './ui/SettingsView.js';
 import { RotatePrompt } from './ui/RotatePrompt.js';
 import { ProfileCoordinator } from './services/ProfileCoordinator.js';
+import { LayoutEditController } from './services/LayoutEditController.js';
 import { NavigationManager } from './services/NavigationManager.js';
 import {
   attachDragHandlers as bindDragHandlers,
@@ -98,6 +99,7 @@ export class FlightDeckApp {
     this.orientationUnsub = null;
     this.navigation = new NavigationManager(this);
     this.profileCoordinator = new ProfileCoordinator(this);
+    this.layoutEdit = new LayoutEditController(this);
   }
 
   async init() {
@@ -673,46 +675,7 @@ export class FlightDeckApp {
   }
 
   toggleEditMode(active) {
-    // The Settings page is static and non-editable
-    if (this.activePageId === 'page_settings') {
-      this.isEditMode = false;
-      this.editToolbar.hide();
-      return;
-    }
-
-    // Can't edit a landscape-only page's layout while it's showing the
-    // rotate-device prompt — there's no grid mounted to drag widgets on.
-    if (active) {
-      const page = this.activeProfile.getPage(this.activePageId);
-      if (page && page.orientationLock === 'landscape' && this.currentOrientation !== 'landscape') {
-        this.showToast('Rotate your device to landscape to customize this page.');
-        return;
-      }
-    }
-
-    this.isEditMode = active;
-    if (this.gridContainer) {
-      this.gridContainer.classList.toggle('edit-mode-active', active);
-    }
-    this.cornerOverlayEl?.classList.toggle('edit-mode-active', active);
-
-    this.activeWidgetInstances.forEach((w) => {
-      w.setEditMode(active);
-    });
-
-    // Pencil-icon toggle on the menu corner widget; the toolbar always
-    // starts visible on entry/exit -- the pencil is a temporary peek
-    // toggle, not a persisted preference (see toggleEditToolbarVisibility()).
-    this.editToolbarVisible = true;
-    this.menuToggleWidget?.setAppEditMode(active);
-
-    if (active) {
-      this.saveHistorySnapshot();
-      this.editToolbar.setOrientation(this.currentOrientation);
-      this.editToolbar.show();
-    } else {
-      this.editToolbar.hide();
-    }
+    return this.layoutEdit.toggleEditMode(active);
   }
 
   /**
@@ -723,12 +686,7 @@ export class FlightDeckApp {
    * corner widgets (and any real widget placed between them) occupy.
    */
   toggleEditToolbarVisibility() {
-    this.editToolbarVisible = !this.editToolbarVisible;
-    if (this.editToolbarVisible) {
-      this.editToolbar.show();
-    } else {
-      this.editToolbar.hide();
-    }
+    return this.layoutEdit.toggleEditToolbarVisibility();
   }
 
   /**
@@ -739,9 +697,7 @@ export class FlightDeckApp {
    * @param {boolean} enabled
    */
   toggleAutoReposition(enabled) {
-    this.autoRepositionEnabled = enabled;
-    localStorage.setItem('flightdeck_auto_reposition', String(enabled));
-    this.editToolbar?.setAutoRepositionState(enabled);
+    return this.layoutEdit.toggleAutoReposition(enabled);
   }
 
   /**
@@ -760,64 +716,7 @@ export class FlightDeckApp {
   }
 
   addNewWidgetToPage(widgetType) {
-    const page = this.activeProfile.getPage(this.activePageId);
-    if (!page) return;
-
-    this.saveHistorySnapshot();
-
-    const orientation = this.currentOrientation;
-    const tier = this.currentDeviceTier;
-    const currentWidgets = page.getWidgets(orientation, tier);
-
-    // 1. Normalize existing widgets' layout data (no gap-closing — see renderActivePage)
-    const compacted = this.layoutEngine.normalizeLayout(currentWidgets);
-    page.setWidgets(orientation, tier, compacted);
-
-    const thisGrid = page.getGrid(orientation, tier) || LayoutEngine.getGridSpec(orientation, tier);
-    const descriptor = WidgetRegistry.getDescriptor(widgetType);
-    // Scale the widget-type's declared default width (authored against
-    // mobile's 20/44-col grids) proportionally into the active tier+orientation's
-    // actual column count, rather than a hardcoded mobile-only lookup table.
-    const declaredW = descriptor?.defaultLayout?.w || 10;
-    const declaredForCols = orientation === 'landscape' ? 44 : 20;
-    const defW = Math.max(1, Math.min(thisGrid.columns, Math.round((declaredW / declaredForCols) * thisGrid.columns)));
-    const defH = descriptor?.defaultLayout?.h || 2;
-
-    // Reserved corner cells (menu/App Profile badge) count as occupied so a
-    // new widget is never auto-placed on top of them.
-    const reserved = this.getReservedCornerEntries(orientation, tier, thisGrid);
-    const layout = this.layoutEngine.findNextFreeSlot(
-      defW,
-      defH,
-      [...compacted, ...reserved]
-    );
-
-    const newWidgetConfig = {
-      id: `w_${Date.now()}`,
-      type: widgetType,
-      layout,
-      config: JSON.parse(JSON.stringify(descriptor?.defaultConfig || {}))
-    };
-
-    // Page.addWidget() already auto-mirrors this into the opposite
-    // orientation of the same tier internally -- do not mirror it again
-    // here, that previously pushed a second duplicate entry sharing the
-    // same id into the opposite orientation's widget list.
-    page.addWidget(newWidgetConfig, orientation, tier);
-
-    // 2. Re-render active page to cleanly update and synchronize all layout positions
-    this.renderActivePage();
-
-    // "Quick add" widget types (currently just the configurable button) open
-    // their own config popover immediately after being placed -- Cancel
-    // there undoes this whole add via handleUndo(), reusing the snapshot
-    // saveHistorySnapshot() already took above.
-    if (descriptor?.openConfigOnAdd) {
-      const newInstance = this.activeWidgetInstances.find((w) => w.id === newWidgetConfig.id);
-      if (newInstance) {
-        this.openButtonConfigPopover(newInstance, 'add');
-      }
-    }
+    return this.layoutEdit.addNewWidgetToPage(widgetType);
   }
 
   /**
@@ -826,131 +725,27 @@ export class FlightDeckApp {
    * @param {'add'|'edit'} mode
    */
   openButtonConfigPopover(widgetOrId, mode) {
-    const widget = typeof widgetOrId === 'string'
-      ? this.activeWidgetInstances.find((w) => w.id === widgetOrId)
-      : widgetOrId;
-    if (widget) {
-      this.buttonConfigPopover.open(widget, { mode });
-    }
+    return this.layoutEdit.openButtonConfigPopover(widgetOrId, mode);
   }
 
   removeWidgetFromPage(widgetId, orientation = this.currentOrientation) {
-    const page = this.activeProfile.getPage(this.activePageId);
-    if (!page) return;
-
-    // Widgets marked non-removable (e.g. the Virtual Yoke page's built-in
-    // Center / Detach controls) can't be removed via REMOVE_WIDGET even if
-    // it's published directly — the primary UI-level guards live in
-    // BaseWidget.renderEditOverlay() and PropertyInspector.handleRemove().
-    const tier = this.currentDeviceTier;
-    const target = page.getWidgets(orientation, tier).find((w) => w.id === widgetId);
-    if (target && target.config?.removable === false) {
-      this.showToast('This widget is built into the page and cannot be removed.');
-      return;
-    }
-
-    this.saveHistorySnapshot();
-
-    // Remove strictly from the layout tier + orientation where edit was initiated
-    page.removeWidget(widgetId, orientation, tier);
-
-    // Normalize current tier + orientation (no gap-closing — see renderActivePage)
-    const updated = this.layoutEngine.normalizeLayout(page.getWidgets(orientation, tier));
-    page.setWidgets(orientation, tier, updated);
-
-    const instanceIdx = this.activeWidgetInstances.findIndex((w) => w.id === widgetId);
-    if (instanceIdx !== -1) {
-      this.activeWidgetInstances[instanceIdx].destroy();
-      this.activeWidgetInstances.splice(instanceIdx, 1);
-    }
-
-    // Sync all remaining instances
-    this.activeWidgetInstances.forEach((inst) => {
-      const matching = updated.find((w) => w.id === inst.id);
-      if (matching) {
-        inst.layout = { ...matching.layout };
-        inst.applyLayoutStyles();
-      }
-    });
+    return this.layoutEdit.removeWidgetFromPage(widgetId, orientation);
   }
 
   handleUpdateWidgetConfig(widgetId, { layout, config }, orientation = this.currentOrientation) {
-    const page = this.activeProfile.getPage(this.activePageId);
-    if (!page) return;
-
-    this.saveHistorySnapshot();
-
-    const tier = this.currentDeviceTier;
-    const gridSpec = page.getGrid(orientation, tier) || LayoutEngine.getGridSpec(orientation, tier);
-    if (gridSpec && gridSpec.columns) {
-      this.layoutEngine.gridCols = gridSpec.columns;
-    }
-
-    if (layout) {
-      const reserved = this.getReservedCornerEntries(orientation, tier, gridSpec);
-      const currentWidgets = page.getWidgets(orientation, tier);
-      const updatedWidgets = this.resolveWithReservedCorners(widgetId, layout, currentWidgets, reserved);
-      page.setWidgets(orientation, tier, updatedWidgets);
-
-      this.activeWidgetInstances.forEach((inst) => {
-        const matching = updatedWidgets.find((w) => w.id === inst.id);
-        if (matching) {
-          inst.layout = { ...matching.layout };
-          inst.applyLayoutStyles();
-        }
-      });
-    }
-
-    if (config) {
-      // Scoped strictly to the active tier + orientation layout
-      page.updateWidget(widgetId, { config }, orientation, false, tier);
-      const widgetInstance = this.activeWidgetInstances.find((w) => w.id === widgetId);
-      if (widgetInstance) {
-        widgetInstance.updateConfig(config);
-      }
-    }
+    return this.layoutEdit.handleUpdateWidgetConfig(widgetId, { layout, config }, orientation);
   }
 
   handleMirrorLayout() {
-    const page = this.activeProfile.getPage(this.activePageId);
-    if (!page) return;
-
-    this.saveHistorySnapshot();
-
-    const tier = this.currentDeviceTier;
-    const fromOrientation = this.currentOrientation;
-    const toOrientation = fromOrientation === 'portrait' ? 'landscape' : 'portrait';
-
-    // Same-tier mirror only -- an author on the tablet/desktop tier mirrors
-    // within that tier's own portrait/landscape, never into mobile's.
-    const sourceWidgets = page.getWidgets(fromOrientation, tier);
-    const sourceGrid = page.getGrid(fromOrientation, tier) || LayoutEngine.getGridSpec(fromOrientation, tier);
-    const targetGrid = page.getGrid(toOrientation, tier) || LayoutEngine.getGridSpec(toOrientation, tier);
-
-    let mirrored = this.layoutEngine.mirrorLayout(sourceWidgets, sourceGrid, targetGrid);
-
-    // mirrorLayout() has no obstacle-list parameter to reserve the target
-    // orientation's corner cells directly, so push anything that landed on
-    // one out of the way as a post-pass -- see resolveListWithReservedCorners().
-    const targetReserved = this.getReservedCornerEntries(toOrientation, tier, targetGrid);
-    mirrored = this.resolveListWithReservedCorners(mirrored, targetReserved);
-
-    page.setWidgets(toOrientation, tier, mirrored);
-
-    console.log(`[FlightDeck] Layout mirrored from ${fromOrientation} to ${toOrientation}`);
+    return this.layoutEdit.handleMirrorLayout();
   }
 
   saveHistorySnapshot() {
-    const serialized = JSON.stringify(this.activeProfile.toJSON());
-    this.historyStack.push(serialized);
-    if (this.historyStack.length > 20) this.historyStack.shift();
+    return this.layoutEdit.saveHistorySnapshot();
   }
 
-  async handleUndo() {
-    if (this.historyStack.length === 0) return;
-    const previous = this.historyStack.pop();
-    this.activeProfile = await this.activateProfile(JSON.parse(previous));
-    this.renderActivePage();
+  handleUndo() {
+    return this.layoutEdit.handleUndo();
   }
 
   /**
@@ -960,37 +755,15 @@ export class FlightDeckApp {
    * alone; this is the explicit, user-requested way to actually close them.
    */
   handleCompactLayout() {
-    const page = this.activeProfile.getPage(this.activePageId);
-    if (!page) return;
-
-    this.saveHistorySnapshot();
-
-    const orientation = this.currentOrientation;
-    const tier = this.currentDeviceTier;
-    const gridSpec = page.getGrid(orientation, tier) || LayoutEngine.getGridSpec(orientation, tier);
-    // Reserved corner cells count as obstacles here too, so compaction never
-    // pulls a real widget up into one.
-    const reserved = this.getReservedCornerEntries(orientation, tier, gridSpec);
-    const compacted = this.layoutEngine.compactLayout([...page.getWidgets(orientation, tier), ...reserved])
-      .filter((w) => !reserved.some((r) => r.id === w.id));
-    page.setWidgets(orientation, tier, compacted);
-
-    this.renderActivePage();
+    return this.layoutEdit.handleCompactLayout();
   }
 
-  async handleSaveLayout() {
-    await this.ensureEditableProfile();
-    await this.storage.saveProfile(this.activeProfile.toJSON());
-    this.toggleEditMode(false);
+  handleSaveLayout() {
+    return this.layoutEdit.handleSaveLayout();
   }
 
-  async handleCancelEdit() {
-    const raw = await this.storage.getProfile(this.activeProfile.id);
-    if (raw) {
-      this.activeProfile = await this.activateProfile(raw);
-    }
-    this.toggleEditMode(false);
-    this.renderActivePage();
+  handleCancelEdit() {
+    return this.layoutEdit.handleCancelEdit();
   }
 
   /**
