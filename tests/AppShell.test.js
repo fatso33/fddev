@@ -43,7 +43,7 @@ describe('FlightDeckApp shell', () => {
       'autoRepositionEnabled', 'historyStack', 'editToolbar', 'widgetDrawer',
       'propertyInspector', 'profileSelector', 'rotatePrompt', 'cornerWidgetInstances',
       'menuToggleWidget', 'appProfileWidget', 'cornerOverlayEl', 'editToolbarVisible',
-      'contentArea', 'gridContainer', 'orientationUnsub', 'navigation',
+      'contentArea', 'gridContainer', 'orientationUnsub', 'navigation', 'profileCoordinator',
     ]);
     expect(app.navigation).toBeInstanceOf(NavigationManager);
     for (const [field, Class] of [

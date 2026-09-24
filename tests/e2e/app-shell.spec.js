@@ -305,3 +305,36 @@ test('a steady long press on a widget opens the property inspector', async ({ pa
   await page.mouse.up();
   expect(await page.evaluate(() => window.flightDeck.draggedWidget)).toBeNull();
 });
+
+test('editing a shipped page forks Custom, survives reload and reverts that page', async ({ page }) => {
+  await isolateShell(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/index.html');
+  await expect.poll(() => page.evaluate(() => Boolean(window.flightDeck?.activeProfile))).toBe(true);
+  await page.evaluate(() => window.flightDeck.switchPage('page_autopilot'));
+  await page.locator('[data-widget-id="__corner_menu__"]').click();
+  await page.locator('#menu-edit-mode-btn').click();
+  const firstId = await page.evaluate(() => window.flightDeck.activeWidgetInstances[0].id);
+  const center = await widgetCenter(page, firstId);
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.waitForTimeout(600);
+  await expect(page.locator('.fd-inspector-overlay:has(#fd-insp-title)')).not.toHaveClass(/hidden/);
+  await page.mouse.up();
+  await page.locator('#insp-remove-btn').click();
+  await expect(page.locator(`.fd-page-grid [data-widget-id="${firstId}"]`)).toHaveCount(0);
+  await page.locator('#tb-save-btn').click();
+  await expect.poll(() => page.evaluate(() => window.flightDeck.activeProfile.id)).toBe('custom_default_ga');
+  await expect(page.locator('[data-widget-id="__corner_profile__"]')).toContainText('CUSTOM');
+
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.flightDeck?.activeProfile?.id)).toBe('custom_default_ga');
+  await page.evaluate(() => window.flightDeck.switchPage('page_autopilot'));
+  await expect(page.locator(`.fd-page-grid [data-widget-id="${firstId}"]`)).toHaveCount(0);
+
+  await page.locator('[data-widget-id="__corner_menu__"]').click();
+  await page.locator('#menu-edit-mode-btn').click();
+  await page.locator('#tb-revert-btn').click();
+  await expect(page.locator(`.fd-page-grid [data-widget-id="${firstId}"]`)).toHaveCount(1);
+  expect(await page.evaluate(() => window.flightDeck.activeProfile.hasOwnPage('page_autopilot'))).toBe(false);
+});

@@ -22,8 +22,7 @@ import { ButtonConfigPopover } from './ui/ButtonConfigPopover.js';
 import { ProfileSelector } from './ui/ProfileSelector.js';
 import { SettingsView } from './ui/SettingsView.js';
 import { RotatePrompt } from './ui/RotatePrompt.js';
-import { Profile } from './models/Profile.js';
-import { Page } from './models/Page.js';
+import { ProfileCoordinator } from './services/ProfileCoordinator.js';
 import { NavigationManager } from './services/NavigationManager.js';
 import {
   attachDragHandlers as bindDragHandlers,
@@ -98,6 +97,7 @@ export class FlightDeckApp {
     this.gridContainer = null;
     this.orientationUnsub = null;
     this.navigation = new NavigationManager(this);
+    this.profileCoordinator = new ProfileCoordinator(this);
   }
 
   async init() {
@@ -1001,17 +1001,10 @@ export class FlightDeckApp {
    * instead of `new Profile(raw)` directly, or pages the fork hasn't
    * touched won't resolve.
    * @param {object} raw
-   * @returns {Promise<Profile>}
+   * @returns {Promise<import('./models/Profile.js').Profile>}
    */
   async activateProfile(raw) {
-    const profile = new Profile(raw);
-    if (profile.parentProfileId) {
-      const parentRaw = await this.storage.getProfile(profile.parentProfileId);
-      if (parentRaw) {
-        profile.hydrateInheritedPages(new Profile(parentRaw));
-      }
-    }
-    return profile;
+    return this.profileCoordinator.activateProfile(raw);
   }
 
   /**
@@ -1028,14 +1021,7 @@ export class FlightDeckApp {
    * Called once, right before persisting, from handleSaveLayout().
    */
   async ensureEditableProfile() {
-    if (!this.storage.isDefaultProfile(this.activeProfile.id)) {
-      if (this.activeProfile.parentProfileId && !this.activeProfile.hasOwnPage(this.activePageId)) {
-        this.activeProfile.promoteToOwnPage(this.activePageId);
-      }
-      return;
-    }
-    const editedPage = this.activeProfile.getPage(this.activePageId);
-    await this.forkFromDefault(editedPage);
+    return this.profileCoordinator.ensureEditableProfile();
   }
 
   /**
@@ -1045,46 +1031,10 @@ export class FlightDeckApp {
    * as a real override (used when an edited page needs to land somewhere
    * persistable); omit it when forking just to make room for a brand-new
    * custom page (see handleAddCustomPage()).
-   * @param {Page|null} pageToMove
+   * @param {import('./models/Page.js').Page|null} pageToMove
    */
   async forkFromDefault(pageToMove = null) {
-    const defaultId = this.activeProfile.id;
-    const allProfiles = await this.storage.getAllProfiles();
-    let forkRaw = allProfiles.find((p) => p.parentProfileId === defaultId);
-
-    if (!forkRaw) {
-      let name = 'Custom';
-      let suffix = 2;
-      while (allProfiles.some((p) => p.name === name)) {
-        name = `Custom (${suffix++})`;
-      }
-      forkRaw = {
-        id: `custom_${defaultId}`,
-        profileId: `custom_${defaultId}`,
-        name,
-        aircraft: name,
-        description: `Custom App Profile forked from ${this.activeProfile.name}`,
-        aircraftCategory: this.activeProfile.aircraftCategory,
-        version: this.activeProfile.version,
-        parentProfileId: defaultId,
-        pages: []
-      };
-    }
-
-    const forkProfile = new Profile(forkRaw);
-    if (pageToMove) {
-      forkProfile.removeOwnPage(pageToMove.id);
-      forkProfile.addPage(new Page(JSON.parse(JSON.stringify(pageToMove.toJSON()))));
-    }
-
-    await this.storage.saveProfile(forkProfile.toJSON());
-    await this.storage.setActiveProfileId(forkProfile.id);
-    this.activeProfile = await this.activateProfile(forkProfile.toJSON());
-
-    if (this.profileSelector) this.profileSelector.refreshList();
-    if (this.appProfileWidget) {
-      this.appProfileWidget.setLabel(this.activeProfile.name.toUpperCase().slice(0, 7));
-    }
+    return this.profileCoordinator.forkFromDefault(pageToMove);
   }
 
   /**
@@ -1093,23 +1043,7 @@ export class FlightDeckApp {
    * any other edit), then adds it to the nav menu and switches to it.
    */
   async handleAddCustomPage() {
-    const name = prompt('Enter a name for the new page:');
-    if (!name || !name.trim()) return;
-
-    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'page';
-    const newPage = new Page({
-      id: `page_custom_${slug}_${Math.random().toString(36).slice(2, 6)}`,
-      name: name.trim(),
-      icon: 'grid'
-    });
-
-    if (this.storage.isDefaultProfile(this.activeProfile.id)) {
-      await this.forkFromDefault();
-    }
-    this.activeProfile.addPage(newPage);
-    await this.storage.saveProfile(this.activeProfile.toJSON());
-    this.renderPageMenu();
-    this.switchPage(newPage.id);
+    return this.profileCoordinator.handleAddCustomPage();
   }
 
   /**
@@ -1122,19 +1056,7 @@ export class FlightDeckApp {
    * @param {string} pageId
    */
   async handleDeleteCustomPage(pageId) {
-    if (!this.activeProfile) return;
-    const shippedPageIds = new Set(this.storage.getDefaultProfiles()[0].pages.map((p) => p.id));
-    if (shippedPageIds.has(pageId)) return;
-
-    this.activeProfile.removePage(pageId);
-    await this.storage.saveProfile(this.activeProfile.toJSON());
-    this.renderPageMenu();
-
-    if (this.activePageId === pageId) {
-      const fallback = this.activeProfile.pages[0];
-      this.activePageId = fallback ? fallback.id : 'page_settings';
-    }
-    this.showToast('Page deleted.');
+    return this.profileCoordinator.handleDeleteCustomPage(pageId);
   }
 
   /**
@@ -1143,11 +1065,7 @@ export class FlightDeckApp {
    * @returns {Array<{id: string, name: string}>}
    */
   getCustomPages() {
-    if (!this.activeProfile) return [];
-    const shippedPageIds = new Set(this.storage.getDefaultProfiles()[0].pages.map((p) => p.id));
-    return this.activeProfile.pages
-      .filter((p) => !shippedPageIds.has(p.id))
-      .map((p) => ({ id: p.id, name: p.name }));
+    return this.profileCoordinator.getCustomPages();
   }
 
   /**
@@ -1174,25 +1092,7 @@ export class FlightDeckApp {
    * @param {string} pageId
    */
   async handleRevertPageToDefault(pageId) {
-    // Only a fork (parentProfileId set) has a shipped-default fallback to
-    // revert into -- reverting on the shipped default itself, or on a
-    // standalone profile with no parent, would just delete the page outright.
-    if (!this.activeProfile.parentProfileId) {
-      this.showToast('This page has no default version to revert to.');
-      return;
-    }
-    if (!this.activeProfile.hasOwnPage(pageId)) {
-      this.showToast('This page has no custom changes to revert.');
-      return;
-    }
-    this.activeProfile.removeOwnPage(pageId);
-    const parentRaw = await this.storage.getProfile(this.activeProfile.parentProfileId);
-    if (parentRaw) {
-      this.activeProfile.hydrateInheritedPages(new Profile(parentRaw));
-    }
-    await this.storage.saveProfile(this.activeProfile.toJSON());
-    this.renderActivePage();
-    this.showToast('Page reverted to default.');
+    return this.profileCoordinator.handleRevertPageToDefault(pageId);
   }
 
   initServiceWorker() {
